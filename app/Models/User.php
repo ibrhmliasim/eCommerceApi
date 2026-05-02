@@ -2,31 +2,56 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable
-{
-    /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
-    protected function casts(): array
-    {
+class User extends Authenticatable {
+    use HasFactory, Notifiable, SoftDeletes, HasApiTokens;
+
+    protected $fillable = [
+        'email',
+        'password',
+        'phone',
+        'first_name',
+        'last_name',
+        'role',
+        'email_verified_at',
+        'default_shipping_address_id',
+        'default_billing_address_id',
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
+    protected function casts(): array {
         return [
             'email_verified_at' => 'datetime',
-            'password' => 'hashed',
+            'password'          => 'hashed',
+            'role'              => 'string',
         ];
+    }
+
+    // ─── Relationships　リレーション ────────────────────────────────────────
+
+    public function addresses(): HasMany {
+        return $this->hasMany(Address::class);
+    }
+
+    public function defaultShippingAddress(): BelongsTo {
+        return $this->belongsTo(Address::class, 'default_shipping_address_id');
+    }
+
+    public function defaultBillingAddress(): BelongsTo {
+        return $this->belongsTo(Address::class, 'default_billing_address_id');
     }
 }
