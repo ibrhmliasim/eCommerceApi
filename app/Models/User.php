@@ -13,7 +13,8 @@ use Illuminate\Notifications\Notifiable;
 
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable {
+class User extends Authenticatable
+{
     use HasFactory, Notifiable, SoftDeletes, HasApiTokens;
 
     protected $fillable = [
@@ -33,7 +34,8 @@ class User extends Authenticatable {
         'remember_token',
     ];
 
-    protected function casts(): array {
+    protected function casts(): array
+    {
         return [
             'email_verified_at' => 'datetime',
             'password'          => 'hashed',
@@ -43,15 +45,18 @@ class User extends Authenticatable {
 
     // ─── Relationships　リレーション ────────────────────────────────────────
 
-    public function addresses(): HasMany {
+    public function addresses(): HasMany
+    {
         return $this->hasMany(Address::class);
     }
 
-    public function defaultShippingAddress(): BelongsTo {
+    public function defaultShippingAddress(): BelongsTo
+    {
         return $this->belongsTo(Address::class, 'default_shipping_address_id');
     }
 
-    public function defaultBillingAddress(): BelongsTo {
+    public function defaultBillingAddress(): BelongsTo
+    {
         return $this->belongsTo(Address::class, 'default_billing_address_id');
     }
 }

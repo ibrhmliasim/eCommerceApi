@@ -7,7 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Address extends Model {
+class Address extends Model
+{
     use HasFactory;
 
     protected $fillable = [
@@ -24,7 +25,8 @@ class Address extends Model {
 
     // ─── Relationships リレーション ────────────────────────────────────────
 
-    public function user(): BelongsTo {
+    public function user(): BelongsTo
+    {
         return $this->belongsTo(User::class);
     }
 }
