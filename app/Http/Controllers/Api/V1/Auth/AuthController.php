@@ -27,7 +27,7 @@ class AuthController extends Controller
     {
         if (!Auth::attempt($request->only('email', 'password'))) {
             return response()->json([
-                'message' => '間違いがあります。再確認おねがいします。',
+                'message' => 'Invalid credentials',
             ], 401);
         }
 
