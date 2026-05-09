@@ -1,4 +1,5 @@
 <?php
+// Resource — это про форму ответа. Что именно отдаём фронту и в каком виде. Например у User модели есть password, remember_token, deleted_at — но фронту это не нужно и небезопасно. Resource говорит "отдай только эти поля и в таком формате".
 
 namespace App\Http\Resources;
 
