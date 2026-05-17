@@ -6,6 +6,10 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
+/**
+ * @property \App\Models\User $resource
+ * * @method __construct(\App\Models\User $resource)
+ */
 class UserResource extends JsonResource
 {
     /**

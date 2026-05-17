@@ -3,50 +3,48 @@
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Http\Controllers\Controller;
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterRequest;
 use App\Http\Resources\UserResource;
-
-use App\Models\User;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-
+use App\Services\AuthService;
 
 class AuthController extends Controller
 {
-    public function register (RegisterRequest $request): JsonResponse
-    {
-        $user = User::create($request->validated());
+    // コンストラクター(Dependency Injection)を通じてサービスを実装します。
+    public function __construct(
+        protected AuthService $authService
+    ) {}
 
-        return response()->json([
-            'data' => new UserResource($user),
-        ], 201);
-    }
-    public function login (LoginRequest $request): JsonResponse
+    public function register(RegisterRequest $request): JsonResponse
     {
-        if (!Auth::attempt($request->only('email', 'password'))) {
-            return response()->json([
-                'message' => 'Invalid credentials',
-            ], 401);
-        }
+        $user = $this->authService->register($request->validated());
 
-        return response()->json([
-            'data' => new UserResource(Auth::user()),
-        ]);
+        return UserResource::make($user)->response()->setStatusCode(201);
     }
+
+    public function login(LoginRequest $request): UserResource
+    {
+        $user = $this->authService->login($request->only('email', 'password'));
+
+        return UserResource::make($user);
+    }
+
     public function logout(Request $request): JsonResponse
     {
-        Auth::guard('web')->logout();
+        $this->authService->logout();
 
-        return response()->json([
-            'message' => 'Logged out successfully',
-        ]);
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return response()->json(['message' => 'Logged out successfully']);
     }
-    public function me(Request $request): JsonResponse
+
+    public function me(Request $request): UserResource
     {
-        return response()->json([
-            'data' => new UserResource($request->user()),
-        ]);
+        return UserResource::make($request->user());
     }
 }
