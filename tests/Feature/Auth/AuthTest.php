@@ -2,54 +2,52 @@
 
 namespace Tests\Feature\Auth;
 
-use App\Models\User;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Foundation\Testing\WithFaker;
 use Tests\TestCase;
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class AuthTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * Register/登録
-     */
+    // =========================================================
+    //  Register / 登録
+    // =========================================================
+
     public function test_user_can_register(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
             'email'                 => 'test@test.com',
-            'password'              => 'password',
-            'password_confirmation' => 'password',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
             'first_name'            => 'Test',
             'last_name'             => 'Testonia',
         ]);
 
         $response->assertStatus(201)
                  ->assertJsonStructure([
-                    'data' => [
-                        'id',
-                        'email',
-                        'first_name',
-                        'last_name',
-                        'role',
-                        'created_at'
-                    ]
+                     'data' => [
+                         'id',
+                         'email',
+                         'first_name',
+                         'last_name',
+                         'role',
+                         'created_at',
+                     ],
                  ]);
 
-        $this->assertDataBaseHas('users', [
-            'email'=> 'test@test.com',
-        ]);
+        $this->assertDatabaseHas('users', ['email' => 'test@test.com']);
     }
 
-    public function test_user_can_register_with_duplicate_email(): void
+    public function test_register_fails_with_duplicate_email(): void
     {
         User::factory()->create(['email' => 'test@test.com']);
 
         $response = $this->postJson('/api/v1/auth/register', [
-            'email'                => 'test@test.com',
-            'password'             => 'password',
-            'password_confirmation'=> 'password',
+            'email'                 => 'test@test.com',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
         ]);
 
         $response->assertStatus(422)
@@ -67,9 +65,10 @@ class AuthTest extends TestCase
                  ->assertJsonValidationErrors(['email', 'password']);
     }
 
-    /**
-     * Login/ログイン
-     */
+    // =========================================================
+    //  Login / ログイン
+    // =========================================================
+
     public function test_user_can_login(): void
     {
         User::factory()->create([
@@ -77,15 +76,18 @@ class AuthTest extends TestCase
             'password' => bcrypt('password123'),
         ]);
 
-        $response = $this->postJson('/api/v1/auth/login', [
-            'email' => 'test@test.com',
+        $response = $this->withHeaders([
+            'Accept'  => 'application/json',
+            'Referer' => 'http://localhost:3000',
+        ])->postJson('/api/v1/auth/login', [
+            'email'    => 'test@test.com',
             'password' => 'password123',
         ]);
 
         $response->assertStatus(200)
                  ->assertJsonStructure([
-                     'data' => ['id', 'email']
-                 ]);
+                     'data' => ['id', 'email'],
+                 ]);        
     }
 
     public function test_login_fails_with_wrong_password(): void
@@ -100,25 +102,75 @@ class AuthTest extends TestCase
             'password' => 'wrongpassword',
         ]);
 
-        $response->assertStatus(401)
-                 ->assertJson(['message' => 'Invalid credentials']);
+        // ValidationException → 422, ошибка в поле email
+        $response->assertStatus(422)
+                 ->assertJsonValidationErrors(['email']);
     }
 
-    /**
-     * Me/個人的
-     */
+    public function test_login_fails_for_deleted_user(): void
+    {
+        // SoftDelete — пользователь удалён, но в БД есть
+        $user = User::factory()->create([
+            'email'    => 'deleted@test.com',
+            'password' => bcrypt('password123'),
+        ]);
+        $user->delete();
+
+        $response = $this->postJson('/api/v1/auth/login', [
+            'email'    => 'deleted@test.com',
+            'password' => 'password123',
+        ]);
+
+        $response->assertStatus(422)
+                 ->assertJsonValidationErrors(['email']);
+    }
+
+    // =========================================================
+    //  Logout / ログアウト
+    // =========================================================
+
+    public function test_authenticated_user_can_logout(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+
+        $response = $this
+                    ->withSession([])
+                    ->actingAs($user, 'web')
+                    ->withHeaders([
+                         'Accept'  => 'application/json',
+                         'Referer' => 'http://localhost:3000',
+                     ])
+                     ->postJson('/api/v1/auth/logout');
+
+        $response->assertStatus(200)
+                 ->assertJson(['message' => 'Logged out successfully']);
+        
+        $this->assertGuest('web');         
+    }
+
+    public function test_unauthenticated_user_cannot_logout(): void
+    {
+        $response = $this->postJson('/api/v1/auth/logout');
+
+        $response->assertStatus(401);
+    }
+
+    // =========================================================
+    //  Me / プロフィール
+    // =========================================================
 
     public function test_authenticated_user_can_get_profile(): void
     {
-        /** @var \App\Models\User $user */
-        $user = User::factory()->createOne();
+        /** @var User $user */
+        $user = User::factory()->create();
 
         $response = $this->actingAs($user)
                          ->getJson('/api/v1/auth/me');
 
         $response->assertStatus(200)
                  ->assertJsonStructure([
-                     'data' => ['id', 'email']
+                     'data' => ['id', 'email'],
                  ]);
     }
 
