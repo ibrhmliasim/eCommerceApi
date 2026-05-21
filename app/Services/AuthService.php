@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
+use App\Jobs\SendWelcomeEmailJob;
+
 class AuthService
 {
     /**
@@ -20,7 +22,7 @@ class AuthService
      */
     public function register(RegisterDTO $dto): User
     {
-        return DB::transaction(function () use ($dto) {
+        $user = DB::transaction(function () use ($dto) {
             $user = User::create([
                 'first_name'    => $dto->first_name,
                 'last_name'     => $dto->last_name,
@@ -38,7 +40,10 @@ class AuthService
 
             return $user;
         });
-        // このブロック内の少なくとも1行が失敗した場合、Laravelは自動的にロールバックされ、データベースにゴミは残りまん。
+
+        SendWelcomeEmailJob::dispatch($user);
+
+        return $user;
     }
 
      /**
@@ -83,6 +88,6 @@ class AuthService
      */
     public function logout(): void
     {
-        Auth::logout();
+        Auth::guard('web')->logout();
     }
 }
