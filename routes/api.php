@@ -13,12 +13,6 @@ Route::prefix('v1')->group(function () {
         Route::post('register', [AuthController::class, 'register'])->middleware('throttle:10,1');
         Route::post('login',    [AuthController::class, 'login'])->middleware('throttle:5,1');
 
-        // Email Verification
-        Route::get('email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
-            ->middleware('signed')
-            ->middleware('throttle:5,1')
-            ->name('verification.verify');
-
         Route::middleware('auth:sanctum')->group(function () {
             Route::post('logout', [AuthController::class, 'logout']);
             Route::get('me',      [AuthController::class, 'me']);
@@ -26,6 +20,12 @@ Route::prefix('v1')->group(function () {
             // Email Resend auth necessary
             Route::post('email/resend', [EmailVerificationController::class, 'resend'])->middleware('throttle:3,1');
         });
+
+        // Email Verification
+        Route::get('email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
+            ->middleware('signed')
+            ->middleware('throttle:5,1')
+            ->name('verification.verify');
 
         // Password Reset
         Route::post('password/forgot', [PasswordResetController::class, 'forgot'])->middleware('throttle:5,1');
