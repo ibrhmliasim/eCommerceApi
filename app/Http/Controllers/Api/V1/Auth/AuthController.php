@@ -3,16 +3,18 @@
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Services\AuthService;
+
+use App\DTOs\Auth\LoginDTO;
+use App\DTOs\Auth\RegisterDTO;
+
+use App\Http\Requests\Auth\LoginRequest;
+use App\Http\Requests\Auth\RegisterRequest;
+
+use App\Http\Resources\UserResource;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-
-use App\Services\AuthService;
-use App\DTOs\Auth\LoginDTO;
-use App\DTOs\Auth\RegisterDTO;
-use App\Http\Resources\UserResource;
-use App\Http\Requests\Auth\LoginRequest;
-use App\Http\Requests\Auth\RegisterRequest;
 
 class AuthController extends Controller
 {
