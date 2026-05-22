@@ -2,16 +2,16 @@
 
 namespace App\Services;
 
+use App\Models\User;
 use App\DTOs\Auth\LoginDTO;
 use App\DTOs\Auth\RegisterDTO;
-use App\Models\User;
+use App\Notifications\WelcomeNotification;
 
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
-
-use App\Jobs\SendWelcomeEmailJob;
 
 class AuthService
 {
@@ -41,7 +41,16 @@ class AuthService
             return $user;
         });
 
-        SendWelcomeEmailJob::dispatch($user);
+        $verificationUrl = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(60),
+            [
+                'id' => $user->id,
+                'hash' => sha1($user->getEmailForVerification()),
+            ]
+        );
+        
+        $user->notify(new WelcomeNotification($verificationUrl));
 
         return $user;
     }
