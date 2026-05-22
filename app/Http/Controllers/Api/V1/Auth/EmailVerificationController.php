@@ -23,21 +23,20 @@ class EmailVerificationController extends Controller
      */
     public function verify($id, $hash): JsonResponse
     {
-        $user = User::findOrFail($id);
+        $user = User::find($id);
 
-        if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+        if (! $user || ! hash_equals(sha1($user->getEmailForVerification()), $hash)) {
             throw new AuthorizationException();
         }
 
         if ($user->hasVerifiedEmail()) {
-            return response()->json(['message' => 'Email already verified'], 400);
+            return response()->json(['message' => __('auth.email_already_verified')]);
         }
 
         $user->markEmailAsVerified();
-
         event(new Verified($user));
 
-        return response()->json(['message' => 'Email verified successfully']);
+        return response()->json(['message' => __('auth.email_verified')]);
     }
 
     /**
@@ -47,8 +46,14 @@ class EmailVerificationController extends Controller
      */
     public function resend(Request $request): JsonResponse
     {
-        $request->user()->sendEmailVerificationNotification();
+        $user = $request->user();
 
-        return response()->json(['message' => 'Email verification sent']);
+        if ($user->hasVerifiedEmail()) {
+            return response()->json(['message' => __('auth.email_already_verified')]);
+        }
+    
+        $user->sendEmailVerificationNotification();
+    
+        return response()->json(['message' => __('auth.verification_sent')]);
     }
 }

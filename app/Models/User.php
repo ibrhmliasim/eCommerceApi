@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 use Illuminate\Notifications\Notifiable;
+use App\Notifications\VerifyEmailNotification;
 
 use Laravel\Sanctum\HasApiTokens;
 
@@ -60,5 +61,11 @@ class User extends Authenticatable implements MustVerifyEmail
     public function defaultBillingAddress(): BelongsTo
     {
         return $this->belongsTo(Address::class, 'default_billing_address_id');
+    }
+
+    // Notifications
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->notify(new VerifyEmailNotification());
     }
 }
