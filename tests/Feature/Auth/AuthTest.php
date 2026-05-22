@@ -102,7 +102,7 @@ class AuthTest extends TestCase
             'password' => 'wrongpassword',
         ]);
 
-        // ValidationException → 422, ошибка в поле email
+        // ValidationException → 422, メールフィールドのエラー
         $response->assertStatus(422)
                  ->assertJsonValidationErrors(['email']);
     }

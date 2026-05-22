@@ -10,10 +10,8 @@ use App\Notifications\WelcomeNotification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
-
-use App\Jobs\SendWelcomeEmailJob;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
 
 class AuthService
 {

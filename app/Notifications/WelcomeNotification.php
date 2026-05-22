@@ -32,9 +32,6 @@ class WelcomeNotification extends Notification implements ShouldQueue
      */
     public function toMail(object $notifiable): MailMessage
     {
-        
-        
-
         return (new MailMessage)
             ->subject('Welcome to Plush!')
             ->line('Please confirm that you want to use this mail address for your Plush account. Once its done, you will be able to use Plush website!')
