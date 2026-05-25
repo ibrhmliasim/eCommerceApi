@@ -5,13 +5,12 @@ namespace App\Services;
 use App\Models\User;
 use App\DTOs\Auth\LoginDTO;
 use App\DTOs\Auth\RegisterDTO;
-use App\Notifications\WelcomeNotification;
 
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Auth\Events\Registered;
 
 class AuthService
 {
@@ -40,17 +39,8 @@ class AuthService
 
             return $user;
         });
-
-        $verificationUrl = URL::temporarySignedRoute(
-            'verification.verify',
-            now()->addMinutes(60),
-            [
-                'id' => $user->id,
-                'hash' => sha1($user->getEmailForVerification()),
-            ]
-        );
         
-        $user->notify(new WelcomeNotification($verificationUrl));
+        event(new Registered($user));
 
         return $user;
     }
@@ -69,10 +59,7 @@ class AuthService
 
         // ユーザーが存在しない、またはパスワードが一致しない場合は同じエラーを返す
         // (ユーザー存在の有無を攻撃者に知らせないため)
-        if (!Auth::attempt([
-            'email' => $dto->email,
-            'password' => $dto->password,
-        ])) {
+        if (! Auth::attempt(['email' => $dto->email, 'password' => $dto->password])) {
             throw ValidationException::withMessages([
                 'email' => __('auth.failed'),
             ]);
@@ -83,9 +70,7 @@ class AuthService
 
         // パスワードハッシュのアップグレード (bcryptコスト変更時など)
         if (Hash::needsRehash($user->password)) {
-            $user->forceFill([
-                'password' => Hash::make($dto->password)
-            ])->save();
+            $user->forceFill(['password' => Hash::make($dto->password)])->save();
         }
 
         return $user;

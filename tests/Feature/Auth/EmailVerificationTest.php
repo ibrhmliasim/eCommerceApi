@@ -3,22 +3,17 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Notifications\VerifyEmailNotification;
 
 use Tests\TestCase;
 use Illuminate\Support\Facades\URL;
-use Illuminate\Foundation\Testing\WithFaker;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
 use Illuminate\Support\Facades\Notification;
-use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class EmailVerificationTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * A basic feature test example.
-     */
     public function test_user_can_verify_email(): void
     {
         $user = User::factory()->create(['email_verified_at' => null]);
@@ -29,10 +24,11 @@ class EmailVerificationTest extends TestCase
             ['id' => $user->id, 'hash' => sha1($user->email)]
         );
 
-        $response = $this->actingAs($user, 'sanctum')->getJson($url);
 
-        $response->assertStatus(200)
-                ->assertJson(['message' => 'Email verified successfully']);
+        // セッションなしでメールからクリック        
+        $response = $this->getJson($url);
+        $response->assertOk()
+                 ->assertJson(['message' => __('auth.email_verified')]);
 
         $this->assertNotNull($user->fresh()->email_verified_at);
     }
@@ -41,38 +37,62 @@ class EmailVerificationTest extends TestCase
     {
         $user = User::factory()->create(['email_verified_at' => null]);
 
-        // Генерим правильный URL
         $url = URL::temporarySignedRoute(
             'verification.verify',
             now()->addMinutes(60),
             ['id' => $user->id, 'hash' => sha1($user->email)]
         );
 
-        $invalidUrl = $url . '&fake=123';
+        $response = $this->getJson($url . '&fake=123');
 
-        $response = $this->actingAs($user, 'sanctum')->getJson($invalidUrl);
-
-        $response->assertStatus(403);
+        $response->assertForbidden();
 
         $this->assertNull($user->fresh()->email_verified_at);
+    }
+
+    public function test_already_verified_user_gets_appropriate_response(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $url = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(60),
+            ['id' => $user->id, 'hash' => sha1($user->email)]
+        );
+
+        $response = $this->getJson($url);
+
+        $response->assertOk()
+                 ->assertJson(['message' => __('auth.email_already_verified')]);
     }
 
     public function test_user_can_resend_verification_email(): void
     {
         Notification::fake();
 
-        $user = User::factory()->create([
-            'email_verified_at' => null
-        ]);
+        $user = User::factory()->create(['email_verified_at' => null]);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/auth/email/resend');
 
-        $response->assertStatus(200)
-                ->assertJson([
-                    'message' => 'Email verification sent'
-                ]);
+        $response->assertOk()
+                 ->assertJson(['message' => __('auth.verification_sent')]);
 
-        Notification::assertSentTo($user, VerifyEmail::class);
+        Notification::assertSentTo($user, VerifyEmailNotification::class);
+    }
+
+    public function test_already_verified_user_cannot_resend(): void
+    {
+        Notification::fake();
+
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/auth/email/resend');
+
+        $response->assertOk()
+                 ->assertJson(['message' => __('auth.email_already_verified')]);
+
+        Notification::assertNothingSent();
     }
 }

@@ -2,7 +2,13 @@
 
 namespace App\Providers;
 
+use App\Listeners\SendWelcomeNotificationListener;
+use App\Listeners\SendVerifyEmailNotificationListener;
+
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Auth\Events\Registered;
+
 
 use Illuminate\Auth\Notifications\ResetPassword;
  
@@ -22,8 +28,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        ResetPassword::createUrlUsing(function ($user, string $token) {
-            return config('app.frontend_url') . "/reset-password?token={$token}&email={$user->email}";
-        });
+        Event::listen(Registered::class, SendWelcomeNotificationListener::class);
+        Event::listen(Registered::class, SendVerifyEmailNotificationListener::class);
     }
 }
