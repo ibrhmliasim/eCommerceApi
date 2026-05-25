@@ -2,33 +2,47 @@
 
 namespace App\Providers;
 
-use App\Listeners\SendWelcomeNotificationListener;
-use App\Listeners\SendVerifyEmailNotificationListener;
-
-use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\Event;
-use Illuminate\Auth\Events\Registered;
-
-
 use Illuminate\Auth\Notifications\ResetPassword;
- 
+use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    public function register(): void
-    {
-        //
-    }
-
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
-        Event::listen(Registered::class, SendWelcomeNotificationListener::class);
-        Event::listen(Registered::class, SendVerifyEmailNotificationListener::class);
+        ResetPassword::createUrlUsing(function (mixed $user, string $token): string {
+            return config('app.frontend_url') . "/reset-password?token={$token}&email={$user->email}";
+        });
+
+        // クエリ文字列で署名された URL を SPA に直接デプロイします -
+        // 署名は有効なままですが、バックエンド URL がリファラー/ログに漏洩しなくなりました
+        VerifyEmail::createUrlUsing(function (mixed $notifiable): string {
+            $signedUrl = URL::temporarySignedRoute(
+                'verification.verify',
+                now()->addMinutes(60),
+                [
+                    'id'   => $notifiable->getKey(),
+                    'hash' => sha1($notifiable->getEmailForVerification()),
+                ]
+            );
+
+            $parsed = parse_url($signedUrl);
+            parse_str($parsed['query'], $queryParams);
+
+            // ID とハッシュはパスに存在します: /api/v1/auth/email/verify/{id}/{hash}
+            $segments = explode('/', trim($parsed['path'], '/'));
+            $hash     = array_pop($segments);
+            $id       = array_pop($segments);
+
+            $query = http_build_query([
+                'id'        => $id,
+                'hash'      => $hash,
+                'expires'   => $queryParams['expires'],
+                'signature' => $queryParams['signature'],
+            ]);
+
+            return config('app.frontend_url') . '/auth/verify-email?' . $query;
+        });
     }
 }

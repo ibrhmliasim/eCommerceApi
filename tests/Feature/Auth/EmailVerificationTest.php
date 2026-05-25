@@ -95,4 +95,34 @@ class EmailVerificationTest extends TestCase
 
         Notification::assertNothingSent();
     }
+
+    public function test_verification_email_contains_spa_url_format(): void
+    {
+        Notification::fake();
+
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $user->notify(new VerifyEmailNotification());
+
+        Notification::assertSentTo(
+            $user,
+            VerifyEmailNotification::class,
+            function (VerifyEmailNotification $notification) use ($user): bool {
+                $mail = $notification->toMail($user);
+                $url = $mail->actionUrl;
+
+                // URL はバックエンドではなく SPA につながります
+                $this->assertStringStartsWith(config('app.frontend_url'), $url);
+
+                $this->assertStringNotContainsString('verify_url=', $url);
+
+                $this->assertStringContainsString('id=' . $user->id, $url);
+                $this->assertStringContainsString('hash=', $url);
+                $this->assertStringContainsString('signature=', $url);
+                $this->assertStringContainsString('expires=', $url);
+
+                return true;
+            }
+        );
+    }
 }
