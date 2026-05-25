@@ -15,33 +15,18 @@ class AppServiceProvider extends ServiceProvider
             return config('app.frontend_url') . "/reset-password?token={$token}&email={$user->email}";
         });
 
-        // クエリ文字列で署名された URL を SPA に直接デプロイします -
-        // 署名は有効なままですが、バックエンド URL がリファラー/ログに漏洩しなくなりました
         VerifyEmail::createUrlUsing(function (mixed $notifiable): string {
             $signedUrl = URL::temporarySignedRoute(
                 'verification.verify',
-                now()->addMinutes(60),
+                now()->addMinutes(10),
                 [
                     'id'   => $notifiable->getKey(),
                     'hash' => sha1($notifiable->getEmailForVerification()),
                 ]
             );
-
-            $parsed = parse_url($signedUrl);
-            parse_str($parsed['query'], $queryParams);
-
-            // ID とハッシュはパスに存在します: /api/v1/auth/email/verify/{id}/{hash}
-            $segments = explode('/', trim($parsed['path'], '/'));
-            $hash     = array_pop($segments);
-            $id       = array_pop($segments);
-
-            $query = http_build_query([
-                'id'        => $id,
-                'hash'      => $hash,
-                'expires'   => $queryParams['expires'],
-                'signature' => $queryParams['signature'],
-            ]);
-
+    
+            $query = parse_url($signedUrl, PHP_URL_QUERY);
+    
             return config('app.frontend_url') . '/auth/verify-email?' . $query;
         });
     }
