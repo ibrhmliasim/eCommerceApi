@@ -14,19 +14,24 @@ class EmailVerificationTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function makeVerificationUrl(User $user): string
+    {
+        return URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(10),
+            [
+                'id'   => $user->id,
+                'hash' => sha1($user->email),
+            ]
+        );
+    }
+
     public function test_user_can_verify_email(): void
     {
         $user = User::factory()->create(['email_verified_at' => null]);
 
-        $url = URL::temporarySignedRoute(
-            'verification.verify',
-            now()->addMinutes(60),
-            ['id' => $user->id, 'hash' => sha1($user->email)]
-        );
+        $response = $this->postJson($this->makeVerificationUrl($user));
 
-
-        // セッションなしでメールからクリック        
-        $response = $this->getJson($url);
         $response->assertOk()
                  ->assertJson(['message' => __('auth.email_verified')]);
 
@@ -37,15 +42,9 @@ class EmailVerificationTest extends TestCase
     {
         $user = User::factory()->create(['email_verified_at' => null]);
 
-        $url = URL::temporarySignedRoute(
-            'verification.verify',
-            now()->addMinutes(60),
-            ['id' => $user->id, 'hash' => sha1($user->email)]
-        );
+        $url = $this->makeVerificationUrl($user) . '&fake=123';
 
-        $response = $this->getJson($url . '&fake=123');
-
-        $response->assertForbidden();
+        $this->postJson($url)->assertForbidden();
 
         $this->assertNull($user->fresh()->email_verified_at);
     }
@@ -54,16 +53,9 @@ class EmailVerificationTest extends TestCase
     {
         $user = User::factory()->create(['email_verified_at' => now()]);
 
-        $url = URL::temporarySignedRoute(
-            'verification.verify',
-            now()->addMinutes(60),
-            ['id' => $user->id, 'hash' => sha1($user->email)]
-        );
-
-        $response = $this->getJson($url);
-
-        $response->assertOk()
-                 ->assertJson(['message' => __('auth.email_already_verified')]);
+        $this->postJson($this->makeVerificationUrl($user))
+             ->assertOk()
+             ->assertJson(['message' => __('auth.email_already_verified')]);
     }
 
     public function test_user_can_resend_verification_email(): void
@@ -94,5 +86,86 @@ class EmailVerificationTest extends TestCase
                  ->assertJson(['message' => __('auth.email_already_verified')]);
 
         Notification::assertNothingSent();
+    }
+
+    public function test_verification_email_contains_spa_url_format(): void
+    {
+        Notification::fake();
+
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $user->notify(new VerifyEmailNotification());
+
+        Notification::assertSentTo(
+            $user,
+            VerifyEmailNotification::class,
+            function (VerifyEmailNotification $notification) use ($user): bool {
+                $mail = $notification->toMail($user);
+                $url = $mail->actionUrl;
+
+                // URL はバックエンドではなく SPA につながります
+                $this->assertStringStartsWith(config('app.frontend_url'), $url);
+
+                $this->assertStringNotContainsString('verify_url=', $url);
+
+                $this->assertStringContainsString('id=' . $user->id, $url);
+                $this->assertStringContainsString('hash=', $url);
+                $this->assertStringContainsString('signature=', $url);
+                $this->assertStringContainsString('expires=', $url);
+
+                return true;
+            }
+        );
+    }
+
+    public function test_expired_signature_is_rejected(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $url = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->subMinute(),
+            [
+                'id'   => $user->id,
+                'hash' => sha1($user->email),
+            ]
+        );
+
+        $this->postJson($url)->assertForbidden();
+
+        $this->assertNull($user->fresh()->email_verified_at);
+    }
+
+    public function test_wrong_hash_is_rejected(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $url = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(10),
+            [
+                'id'   => $user->id,
+                'hash' => sha1('wrong@email.com'),
+            ]
+        );
+
+        $this->postJson($url)
+            ->assertForbidden()
+            ->assertJson(['message' => __('auth.invalid_verification_link')]);
+
+        $this->assertNull($user->fresh()->email_verified_at);
+    }
+
+    public function test_soft_deleted_user_cannot_verify(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $url = $this->makeVerificationUrl($user);
+
+        $user->delete();
+
+        $this->postJson($url)
+            ->assertForbidden()
+            ->assertJson(['message' => __('auth.invalid_verification_link')]);
     }
 }

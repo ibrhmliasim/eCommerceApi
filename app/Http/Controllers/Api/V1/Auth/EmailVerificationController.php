@@ -1,4 +1,5 @@
 <?php
+//Won't Fix / By Design - EmailVerificationController、メール検証のためのサービスレイヤーを追加しないように、厚みのある構造になります。AuthServiceはログイン/登録プロセス専用です。
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
@@ -14,19 +15,12 @@ use Illuminate\Auth\Access\AuthorizationException;
 
 class EmailVerificationController extends Controller
 {
-    /**
-     * 検証の概要
-     * @param mixed $id
-     * @param mixed $hash
-     * @throws AuthorizationException
-     * @return JsonResponse
-     */
-    public function verify($id, $hash): JsonResponse
+    public function verify(Request $request): JsonResponse
     {
-        $user = User::find($id);
+        $user = User::find($request->query('id'));
 
-        if (! $user || ! hash_equals(sha1($user->getEmailForVerification()), $hash)) {
-            throw new AuthorizationException();
+        if (! $user || ! hash_equals(sha1($user->getEmailForVerification()), (string) $request->query('hash'))) {
+            throw new AuthorizationException(__('auth.invalid_verification_link'));
         }
 
         if ($user->hasVerifiedEmail()) {
@@ -39,11 +33,6 @@ class EmailVerificationController extends Controller
         return response()->json(['message' => __('auth.email_verified')]);
     }
 
-    /**
-     * 再送の概要
-     * @param Request $request
-     * @return JsonResponse
-     */
     public function resend(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -51,9 +40,9 @@ class EmailVerificationController extends Controller
         if ($user->hasVerifiedEmail()) {
             return response()->json(['message' => __('auth.email_already_verified')]);
         }
-    
+
         $user->sendEmailVerificationNotification();
-    
+
         return response()->json(['message' => __('auth.verification_sent')]);
     }
 }

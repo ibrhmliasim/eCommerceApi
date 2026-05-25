@@ -21,6 +21,7 @@ return [
     'email_verified'        => 'Email verified successfully.',
     'email_already_verified'=> 'Email is already verified.',
     'verification_sent'     => 'Verification email sent.',
+    'invalid_verification_link' => 'This verification link is invalid or has expired.',
 
     // Password reset
     'password_reset'        => 'Password has been reset successfully.',

@@ -22,9 +22,8 @@ Route::prefix('v1')->group(function () {
         });
 
         // Email Verification
-        Route::get('email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
-            ->middleware('signed')
-            ->middleware('throttle:5,1')
+        Route::post('email/verify', [EmailVerificationController::class, 'verify'])
+            ->middleware(['signed', 'throttle:5,1'])
             ->name('verification.verify');
 
         // Password Reset

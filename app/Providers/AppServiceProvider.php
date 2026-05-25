@@ -2,33 +2,32 @@
 
 namespace App\Providers;
 
-use App\Listeners\SendWelcomeNotificationListener;
-use App\Listeners\SendVerifyEmailNotificationListener;
-
-use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\Event;
-use Illuminate\Auth\Events\Registered;
-
-
 use Illuminate\Auth\Notifications\ResetPassword;
- 
+use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    public function register(): void
-    {
-        //
-    }
-
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
-        Event::listen(Registered::class, SendWelcomeNotificationListener::class);
-        Event::listen(Registered::class, SendVerifyEmailNotificationListener::class);
+        ResetPassword::createUrlUsing(function (mixed $user, string $token): string {
+            return config('app.frontend_url') . "/reset-password?token={$token}&email={$user->email}";
+        });
+
+        VerifyEmail::createUrlUsing(function (mixed $notifiable): string {
+            $signedUrl = URL::temporarySignedRoute(
+                'verification.verify',
+                now()->addMinutes(10),
+                [
+                    'id'   => $notifiable->getKey(),
+                    'hash' => sha1($notifiable->getEmailForVerification()),
+                ]
+            );
+    
+            $query = parse_url($signedUrl, PHP_URL_QUERY);
+    
+            return config('app.frontend_url') . '/auth/verify-email?' . $query;
+        });
     }
 }
