@@ -18,9 +18,9 @@ return [
     'throttle'              => 'Too many login attempts. Please try again in :seconds seconds.',
 
     // Email verification
-    'email_verified'        => 'Email verified successfully.',
-    'email_already_verified'=> 'Email is already verified.',
-    'verification_sent'     => 'Verification email sent.',
+    'email_verified'            => 'Email verified successfully.',
+    'email_already_verified'    => 'Email is already verified.',
+    'verification_sent'         => 'Verification email sent.',
     'invalid_verification_link' => 'This verification link is invalid or has expired.',
 
     // Password reset
