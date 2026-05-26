@@ -6,6 +6,11 @@ use Tests\TestCase;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
+
+use App\Notifications\VerifyEmailNotification;
+use App\Notifications\WelcomeNotification;
+
 
 class AuthTest extends TestCase
 {
@@ -63,6 +68,24 @@ class AuthTest extends TestCase
 
         $response->assertStatus(422)
                  ->assertJsonValidationErrors(['email', 'password']);
+    }
+
+    public function test_register_sends_welcome_and_verify_notifications(): void
+    {
+        Notification::fake();
+
+        $this->postJson('/api/v1/auth/register', [
+            'first_name'            => 'John',
+            'last_name'             => 'Doe',
+            'email'                 => 'john@example.com',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
+        ])->assertCreated();
+
+        $user = User::where('email', 'john@example.com')->first();
+
+        Notification::assertSentTo($user, WelcomeNotification::class);
+        Notification::assertSentTo($user, VerifyEmailNotification::class);
     }
 
     // =========================================================

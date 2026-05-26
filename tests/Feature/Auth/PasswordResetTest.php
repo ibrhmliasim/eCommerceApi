@@ -10,6 +10,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Hash;
+
 
 class PasswordResetTest extends TestCase
 {
@@ -79,5 +81,53 @@ class PasswordResetTest extends TestCase
             'password'              => 'newpassword123',
             'password_confirmation' => 'newpassword123',
         ])->assertStatus(422);
+    }
+
+    public function test_reset_updates_password_and_deletes_tokens(): void
+    {
+        $user  = User::factory()->create(['email' => 'test@test.com']);
+        $token = Password::broker()->createToken($user);
+
+        // PAT トークンを作成して削除されることを確認します
+        $user->createToken('test-token');
+
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email'                 => 'test@test.com',
+            'token'                 => $token,
+            'password'              => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ])->assertOk();
+
+        // パスワードが更新されました
+        $this->assertTrue(Hash::check('newpassword123', $user->fresh()->password));
+
+        // トークンが削除されました
+        $this->assertCount(0, $user->fresh()->tokens);
+    }
+
+    public function test_forgot_with_unknown_email_returns_200_without_notification(): void
+    {
+        Notification::fake();
+
+        $this->postJson('/api/v1/auth/password/forgot', [
+            'email' => 'unknown@example.com',
+        ])->assertOk()
+        ->assertJson(['message' => __('auth.reset_link_sent')]);
+
+        Notification::assertNothingSent();
+    }
+
+    public function test_reset_fails_with_weak_password(): void
+    {
+        $user  = User::factory()->create(['email' => 'test@test.com']);
+        $token = Password::broker()->createToken($user);
+
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email'                 => 'test@test.com',
+            'token'                 => $token,
+            'password'              => '123',
+            'password_confirmation' => '123',
+        ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['password']);
     }
 }
