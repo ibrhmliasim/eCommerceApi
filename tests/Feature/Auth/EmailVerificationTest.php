@@ -8,6 +8,8 @@ use App\Notifications\VerifyEmailNotification;
 use Tests\TestCase;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class EmailVerificationTest extends TestCase
@@ -167,5 +169,43 @@ class EmailVerificationTest extends TestCase
         $this->postJson($url)
             ->assertForbidden()
             ->assertJson(['message' => __('auth.invalid_verification_link')]);
+    }
+
+    public function test_unauthenticated_user_cannot_resend(): void
+    {
+        $this->postJson('/api/v1/auth/email/resend')
+            ->assertUnauthorized();
+    }
+
+    public function test_wrong_id_is_rejected(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $url = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(10),
+            [
+                'id'   => 99999,
+                'hash' => sha1($user->email),
+            ]
+        );
+
+        $this->postJson($url)
+            ->assertForbidden()
+            ->assertJson(['message' => __('auth.invalid_verification_link')]);
+    }
+
+    public function test_verified_event_is_fired_on_successful_verification(): void
+    {
+        Event::fake();
+
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $this->postJson($this->makeVerificationUrl($user))
+            ->assertOk();
+
+        Event::assertDispatched(Verified::class, function (Verified $event) use ($user): bool {
+            return $event->user->id === $user->id;
+        });
     }
 }
