@@ -21,7 +21,7 @@ class PasswordResetController extends Controller
         Password::broker()->sendResetLink($request->only('email'));
 
         return response()->json([
-            'message' => 'If this email exists, a reset link has been sent.'
+            'message' => __('auth.reset_link_sent')
         ]);
     }
 

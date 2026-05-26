@@ -2,11 +2,8 @@
 
 namespace App\Providers;
 
-use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
-use Illuminate\Support\Facades\Event;
-use Illuminate\Auth\Events\Registered;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
