@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Hash;
@@ -129,5 +130,103 @@ class PasswordResetTest extends TestCase
             'password_confirmation' => '123',
         ])->assertUnprocessable()
         ->assertJsonValidationErrors(['password']);
+    }
+
+    public function test_reset_invalidates_all_sessions(): void
+    {
+        $user  = User::factory()->create(['email' => 'test@test.com']);
+        $token = Password::broker()->createToken($user);
+
+        // セッションを手動で作成する
+        DB::table('sessions')->insert([
+            'id'          => 'test-session-id',
+            'user_id'     => $user->id,
+            'ip_address'  => '127.0.0.1',
+            'user_agent'  => 'test',
+            'payload'     => base64_encode(json_encode([])),
+            'last_activity' => now()->timestamp,
+        ]);
+
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email'                 => 'test@test.com',
+            'token'                 => $token,
+            'password'              => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('sessions', ['user_id' => $user->id]);
+    }
+
+    public function test_reset_token_cannot_be_reused(): void
+    {
+        $user  = User::factory()->create(['email' => 'test@test.com']);
+        $token = Password::broker()->createToken($user);
+
+        $payload = [
+            'email'                 => 'test@test.com',
+            'token'                 => $token,
+            'password'              => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ];
+
+        $this->postJson('/api/v1/auth/password/reset', $payload)->assertOk();
+
+        // 同じトークンによる 2 番目のリクエストは失敗するはずです
+        $this->postJson('/api/v1/auth/password/reset', $payload)->assertUnprocessable();
+    }
+
+    public function test_forgot_returns_429_when_throttled(): void
+    {
+        $user = User::factory()->create(['email' => 'test@test.com']);
+
+        // 最初のリクエストはトークンを作成します
+        $this->postJson('/api/v1/auth/password/forgot', ['email' => 'test@test.com'])->assertOk();
+
+        // 2 番目 - ブローカー スロットルがトリガーされます (ブローカーのクールダウン 60 秒)
+        $this->postJson('/api/v1/auth/password/forgot', ['email' => 'test@test.com'])
+            ->assertOk()
+            ->assertJson(['message' => __('auth.reset_link_sent')]);
+    }
+
+    public function test_soft_deleted_user_cannot_reset_password(): void
+    {
+        $user  = User::factory()->create(['email' => 'test@test.com']);
+        $token = Password::broker()->createToken($user);
+        $user->delete(); // soft delete
+
+        $this->postJson('/api/v1/auth/password/reset', [
+            'email'                 => 'test@test.com',
+            'token'                 => $token,
+            'password'              => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ])->assertUnprocessable(); // ユーザーはブローカーを見つけられませんя
+    }
+
+    public function test_reset_returns_same_error_for_invalid_token_and_unknown_email(): void
+    {
+        $user  = User::factory()->create(['email' => 'test@test.com']);
+        $token = Password::broker()->createToken($user);
+
+        // 無効なトークン
+        $responseInvalidToken = $this->postJson('/api/v1/auth/password/reset', [
+            'email'                 => 'test@test.com',
+            'token'                 => 'invalid-token',
+            'password'              => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ]);
+
+        // 存在しない電子メールl
+        $responseUnknownEmail = $this->postJson('/api/v1/auth/password/reset', [
+            'email'                 => 'nobody@example.com',
+            'token'                 => $token,
+            'password'              => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ]);
+
+        // 両方とも同じメッセージを返す必要があります
+        $this->assertEquals(
+            $responseInvalidToken->json('errors.email.0'),
+            $responseUnknownEmail->json('errors.email.0'),
+        );
     }
 }

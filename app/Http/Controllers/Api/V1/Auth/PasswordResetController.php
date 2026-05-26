@@ -9,6 +9,7 @@ use App\Http\Requests\Auth\ResetPasswordRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Auth\Events\PasswordReset;
@@ -16,24 +17,16 @@ use Illuminate\Auth\Events\PasswordReset;
 
 class PasswordResetController extends Controller
 {
-    public function forgot(ForgotPasswordRequest $request): JsonResponse
-    {
-        Password::broker()->sendResetLink($request->only('email'));
-
-        return response()->json([
-            'message' => __('auth.reset_link_sent')
-        ]);
-    }
-
     public function reset(ResetPasswordRequest $request): JsonResponse
     {
-
         $status = Password::broker()->reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
             function ($user) use ($request) {
                 $user->forceFill([
                     'password' => Hash::make($request->password),
                 ])->save();
+
+                DB::table('sessions')->where('user_id', $user->id)->delete();
 
                 $user->tokens()->delete();
                 event(new PasswordReset($user));
@@ -43,7 +36,24 @@ class PasswordResetController extends Controller
         return $status === Password::PASSWORD_RESET
             ? response()->json(['message' => __('auth.password_reset')])
             : throw ValidationException::withMessages([
-                'email' => [__($status)]
+                'email' => [__('auth.password_reset_failed')]
             ]);
     }
+
+    public function forgot(ForgotPasswordRequest $request): JsonResponse
+    {
+        $status = Password::broker()->sendResetLink($request->only('email'));
+
+        if ($status === Password::RESET_THROTTLED) {
+            return response()->json(
+                ['message' => __('auth.reset_link_sent')],
+            );
+        }
+
+        return response()->json([
+            'message' => __('auth.reset_link_sent')
+        ]);
+    }
+
+    
 }

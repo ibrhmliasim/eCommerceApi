@@ -1,10 +1,10 @@
 <?php
 
+use Illuminate\Support\Facades\Route;
+
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
-
-use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
 
@@ -22,6 +22,8 @@ Route::prefix('v1')->group(function () {
         });
 
         // Email Verification
+        // Params come from the signed URL query string (id, hash, expires, signature).
+        // Frontend must POST the full URL as-is — do not strip query params.
         Route::post('email/verify', [EmailVerificationController::class, 'verify'])
             ->middleware(['signed', 'throttle:5,1'])
             ->name('verification.verify');
@@ -34,6 +36,6 @@ Route::prefix('v1')->group(function () {
         Route::post('password/reset', [PasswordResetController::class, 'reset'])
             ->middleware('throttle:5,1')
             ->name('password.reset');
-            });
+    });
 
 });

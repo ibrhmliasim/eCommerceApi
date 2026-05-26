@@ -12,7 +12,7 @@ readonly class RegisterDTO
         public string  $last_name,
         public string  $email,
         public string  $password,
-        public ?array  $address = null,
+        public ?string $phone = null,
     ) {}
     public static function fromRequest(RegisterRequest $request): self
     {
@@ -21,7 +21,7 @@ readonly class RegisterDTO
             last_name:  $request->validated('last_name'),
             email:      $request->validated('email'),
             password:   $request->validated('password'),
-            address:    $request->validated('address'),
+            phone:      $request->validated('phone'),
         );
     }
 }

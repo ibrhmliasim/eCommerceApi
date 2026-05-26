@@ -21,27 +21,16 @@ class AuthService
      */
     public function register(RegisterDTO $dto): User
     {
-        $user = DB::transaction(function () use ($dto) {
-            $user = User::create([
-                'first_name'    => $dto->first_name,
-                'last_name'     => $dto->last_name,
-                'email'         => $dto->email,
-                'password'      => Hash::make($dto->password),
-            ]);
-
-            if ($dto->address !== null) {
-                $address = $user->addresses()->create(
-                    array_merge($dto->address)
-                );
-
-                $user->update(['default_shipping_address_id' => $address->id]);
-            }
-
-            return $user;
-        });
-        
+        $user = User::create([
+            'first_name' => $dto->first_name,
+            'last_name'  => $dto->last_name,
+            'email'      => $dto->email,
+            'password'   => $dto->password,
+            'phone'      => $dto->phone,
+        ]);
+    
         event(new Registered($user));
-
+    
         return $user;
     }
 
