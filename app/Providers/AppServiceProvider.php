@@ -11,9 +11,9 @@ class AppServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        ResetPassword::createUrlUsing(function (mixed $user, string $token): string {
-            return config('app.frontend_url') . "/reset-password?token={$token}&email={$user->email}";
-        });
+        ResetPassword::createUrlUsing(fn (mixed $user, string $token): string =>
+            config('app.frontend_url') . '/reset-password?token=' . urlencode($token) . '&email=' . urlencode($user->email)
+        );
 
         VerifyEmail::createUrlUsing(function (mixed $notifiable): string {
             $signedUrl = URL::temporarySignedRoute(
