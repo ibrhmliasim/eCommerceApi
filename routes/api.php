@@ -27,8 +27,13 @@ Route::prefix('v1')->group(function () {
             ->name('verification.verify');
 
         // Password Reset
-        Route::post('password/forgot', [PasswordResetController::class, 'forgot'])->middleware('throttle:5,1');
-        Route::post('password/reset',  [PasswordResetController::class, 'reset'])->middleware('throttle:5,1');
-    });
+        Route::post('password/forgot', [PasswordResetController::class, 'forgot'])
+            ->middleware('throttle:5,1')
+            ->name('password.forgot');
+
+        Route::post('password/reset', [PasswordResetController::class, 'reset'])
+            ->middleware('throttle:5,1')
+            ->name('password.reset');
+            });
 
 });

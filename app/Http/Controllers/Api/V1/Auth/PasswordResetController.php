@@ -41,9 +41,7 @@ class PasswordResetController extends Controller
         );
 
         return $status === Password::PASSWORD_RESET
-            ? response()->json([
-                'message' => __($status)
-            ])
+            ? response()->json(['message' => __('aurh.password_reset')])
             : throw ValidationException::withMessages([
                 'email' => [__($status)]
             ]);
