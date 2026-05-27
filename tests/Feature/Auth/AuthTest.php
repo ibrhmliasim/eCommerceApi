@@ -22,6 +22,8 @@ class AuthTest extends TestCase
 
     public function test_user_can_register(): void
     {
+        Notification::fake();
+        
         $response = $this->postJson('/api/v1/auth/register', [
             'email'                 => 'test@test.com',
             'password'              => 'password123',

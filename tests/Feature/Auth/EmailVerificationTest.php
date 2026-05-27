@@ -64,10 +64,13 @@ class EmailVerificationTest extends TestCase
     {
         Notification::fake();
 
-        $user = User::factory()->create(['email_verified_at' => null]);
+        $user = User::factory()->create(['email_verified_at' => now()]);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/auth/email/resend');
+
+        $response->assertStatus(409)
+            ->assertJson(['message' => __('auth.email_already_verified')]);
 
         Notification::assertNothingSent();
     }
@@ -104,13 +107,15 @@ class EmailVerificationTest extends TestCase
 
                 // URL はバックエンドではなく SPA につながります
                 $this->assertStringStartsWith(config('app.frontend_url'), $url);
+                $this->assertStringContainsString('/auth/verify-email', $url);
 
-                $this->assertStringNotContainsString('verify_url=', $url);
-
+                // パラメータはクエリ文字列を介して渡されます
                 $this->assertStringContainsString('id=' . $user->id, $url);
                 $this->assertStringContainsString('hash=', $url);
                 $this->assertStringContainsString('signature=', $url);
                 $this->assertStringContainsString('expires=', $url);
+
+                $this->assertStringNotContainsString('verify_url=', $url);
 
                 return true;
             }

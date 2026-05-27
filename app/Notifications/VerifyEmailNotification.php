@@ -18,6 +18,6 @@ class VerifyEmailNotification extends VerifyEmail
             ->subject('Verify your email — Plush')
             ->line('Please verify your email to unlock checkout.')
             ->action('Verify my email', $url)
-            ->line('This link expires in 10 minutes.');
+            ->line('This link expires soon.');
     }
 }

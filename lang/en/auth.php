@@ -27,9 +27,9 @@ return [
     // Password reset
     'password_reset'        => 'Password has been reset successfully.',
     'password_reset_failed' => 'Password reset failed.',
-    'reset_link_sent'       => 'Password reset link sent.',
-    'invalid_reset_link'    => 'The password reset link is invalid or has expired.',
+    'reset_link_sent'       => 'If the account exists, password reset link sent. Check your mail.',
 
+    // Logout
     'logout_success'        => 'Logged out successfully.',
 
 ];
