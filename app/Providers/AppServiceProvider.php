@@ -2,23 +2,33 @@
 
 namespace App\Providers;
 
+use Illuminate\Support\ServiceProvider;
+
+use Illuminate\Support\Facades\URL;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
-use Illuminate\Support\Facades\URL;
-use Illuminate\Support\ServiceProvider;
+
+use Illuminate\Http\Request;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
 
 class AppServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+
+        RateLimiter::for('api', function (Request $request) {
+            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+        });
+
         ResetPassword::createUrlUsing(fn (mixed $user, string $token): string =>
-            config('app.frontend_url') . '/reset-password?token=' . urlencode($token) . '&email=' . urlencode($user->email)
+            config('app.frontend_url') . '/auth/reset-password?token=' . urlencode($token) . '&email=' . urlencode($user->email)
         );
 
         VerifyEmail::createUrlUsing(function (mixed $notifiable): string {
             $signedUrl = URL::temporarySignedRoute(
                 'verification.verify',
-                now()->addMinutes(10),
+                now()->addMinutes(60),
                 [
                     'id'   => $notifiable->getKey(),
                     'hash' => sha1($notifiable->getEmailForVerification()),

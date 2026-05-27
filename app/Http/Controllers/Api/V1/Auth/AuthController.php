@@ -53,7 +53,7 @@ class AuthController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return response()->json(['message' => 'Logged out successfully']);
+        return response()->json(['message' => __('auth.logout_success')]);
     }
 
     public function me(Request $request): JsonResponse

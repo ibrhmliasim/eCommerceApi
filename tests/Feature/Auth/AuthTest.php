@@ -22,6 +22,8 @@ class AuthTest extends TestCase
 
     public function test_user_can_register(): void
     {
+        Notification::fake();
+        
         $response = $this->postJson('/api/v1/auth/register', [
             'email'                 => 'test@test.com',
             'password'              => 'password123',
@@ -113,6 +115,24 @@ class AuthTest extends TestCase
                  ]);        
     }
 
+    public function test_unverified_user_can_login(): void
+    {
+        // 現在のポリシーを明示的に文書化します。未確認の人でもログインできます。
+        // 検証済みのミドルウェアをチェックアウト/注文に追加するとき、そこに別のテストを追加します
+        $user = User::factory()->create([
+            'email'             => 'test@test.com',
+            'password'          => bcrypt('password123'),
+            'email_verified_at' => null,
+        ]);
+
+        $this->withHeaders(['Referer' => 'http://localhost:3000'])
+            ->postJson('/api/v1/auth/login', [
+                'email'    => 'test@test.com',
+                'password' => 'password123',
+            ])
+            ->assertOk();
+    }
+
     public function test_login_fails_with_wrong_password(): void
     {
         User::factory()->create([
@@ -148,6 +168,24 @@ class AuthTest extends TestCase
                  ->assertJsonValidationErrors(['email']);
     }
 
+    public function test_login_response_contains_email_verified_at(): void
+    {
+        $user = User::factory()->create([
+            'email'    => 'test@test.com',
+            'password' => bcrypt('password123'),
+        ]);
+
+        $this->withHeaders(['Referer' => 'http://localhost:3000'])
+            ->postJson('/api/v1/auth/login', [
+                'email'    => 'test@test.com',
+                'password' => 'password123',
+            ])
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => ['id', 'email', 'email_verified_at'],
+            ]);
+    }
+
     // =========================================================
     //  Logout / ログアウト
     // =========================================================
@@ -167,7 +205,7 @@ class AuthTest extends TestCase
                      ->postJson('/api/v1/auth/logout');
 
         $response->assertStatus(200)
-                 ->assertJson(['message' => 'Logged out successfully']);
+                 ->assertJson(['message' => __('auth.logout_success')]);
         
         $this->assertGuest('web');         
     }

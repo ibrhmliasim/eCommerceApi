@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use Illuminate\Validation\Rule;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -23,7 +24,7 @@ class RegisterRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email'      => ['required', 'email', 'unique:users,email'],
+            'email'      => ['required', 'email', Rule::unique('users', 'email')->whereNull('deleted_at'),],
             'password'   => ['required', 'string', 'min:8', 'confirmed'],
             'phone'      => ['nullable', 'string', 'unique:users,phone'],
             'first_name' => ['required', 'string', 'max:100'],

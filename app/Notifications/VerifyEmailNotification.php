@@ -3,14 +3,13 @@
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\VerifyEmail;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
+// use Illuminate\Bus\Queueable;
+// use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 
-class VerifyEmailNotification extends VerifyEmail implements ShouldQueue
+// ShouldQueue と Queueable は削除されます - Notificationは同期的に送信されます 
+class VerifyEmailNotification extends VerifyEmail
 {
-    use Queueable;
-
     public function toMail(mixed $notifiable): MailMessage
     {
         $url = $this->verificationUrl($notifiable);
@@ -19,6 +18,6 @@ class VerifyEmailNotification extends VerifyEmail implements ShouldQueue
             ->subject('Verify your email — Plush')
             ->line('Please verify your email to unlock checkout.')
             ->action('Verify my email', $url)
-            ->line('This link expires in 10 minutes.');
+            ->line('This link expires soon.');
     }
 }

@@ -24,11 +24,12 @@ class EmailVerificationController extends Controller
         }
 
         if ($user->hasVerifiedEmail()) {
-            return response()->json(['message' => __('auth.email_already_verified')]);
+            return response()->json(['message' => __('auth.email_already_verified')], 409);
         }
 
-        $user->markEmailAsVerified();
-        event(new Verified($user));
+        if ($user->markEmailAsVerified()) {
+            event(new Verified($user));
+        }
 
         return response()->json(['message' => __('auth.email_verified')]);
     }
@@ -38,7 +39,7 @@ class EmailVerificationController extends Controller
         $user = $request->user();
 
         if ($user->hasVerifiedEmail()) {
-            return response()->json(['message' => __('auth.email_already_verified')]);
+            return response()->json(['message' => __('auth.email_already_verified')], 409);
         }
 
         $user->sendEmailVerificationNotification();

@@ -22,9 +22,14 @@ return [
     'email_already_verified'    => 'Email is already verified.',
     'verification_sent'         => 'Verification email sent.',
     'invalid_verification_link' => 'This verification link is invalid or has expired.',
+    'email_not_verified'        => 'Email address is not verified.',
 
     // Password reset
     'password_reset'        => 'Password has been reset successfully.',
-    'reset_link_sent'       => 'Password reset link sent.',
+    'password_reset_failed' => 'Password reset failed.',
+    'reset_link_sent'       => 'If the account exists, password reset link sent. Check your mail.',
+
+    // Logout
+    'logout_success'        => 'Logged out successfully.',
 
 ];

@@ -20,7 +20,7 @@ class EmailVerificationTest extends TestCase
     {
         return URL::temporarySignedRoute(
             'verification.verify',
-            now()->addMinutes(10),
+            now()->addMinutes(60),
             [
                 'id'   => $user->id,
                 'hash' => sha1($user->email),
@@ -56,8 +56,23 @@ class EmailVerificationTest extends TestCase
         $user = User::factory()->create(['email_verified_at' => now()]);
 
         $this->postJson($this->makeVerificationUrl($user))
-             ->assertOk()
+             ->assertStatus(409)
              ->assertJson(['message' => __('auth.email_already_verified')]);
+    }
+
+    public function test_already_verified_user_cannot_resend(): void
+    {
+        Notification::fake();
+
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/auth/email/resend');
+
+        $response->assertStatus(409)
+            ->assertJson(['message' => __('auth.email_already_verified')]);
+
+        Notification::assertNothingSent();
     }
 
     public function test_user_can_resend_verification_email(): void
@@ -73,21 +88,6 @@ class EmailVerificationTest extends TestCase
                  ->assertJson(['message' => __('auth.verification_sent')]);
 
         Notification::assertSentTo($user, VerifyEmailNotification::class);
-    }
-
-    public function test_already_verified_user_cannot_resend(): void
-    {
-        Notification::fake();
-
-        $user = User::factory()->create(['email_verified_at' => now()]);
-
-        $response = $this->actingAs($user, 'sanctum')
-            ->postJson('/api/v1/auth/email/resend');
-
-        $response->assertOk()
-                 ->assertJson(['message' => __('auth.email_already_verified')]);
-
-        Notification::assertNothingSent();
     }
 
     public function test_verification_email_contains_spa_url_format(): void
@@ -107,13 +107,15 @@ class EmailVerificationTest extends TestCase
 
                 // URL はバックエンドではなく SPA につながります
                 $this->assertStringStartsWith(config('app.frontend_url'), $url);
+                $this->assertStringContainsString('/auth/verify-email', $url);
 
-                $this->assertStringNotContainsString('verify_url=', $url);
-
+                // パラメータはクエリ文字列を介して渡されます
                 $this->assertStringContainsString('id=' . $user->id, $url);
                 $this->assertStringContainsString('hash=', $url);
                 $this->assertStringContainsString('signature=', $url);
                 $this->assertStringContainsString('expires=', $url);
+
+                $this->assertStringNotContainsString('verify_url=', $url);
 
                 return true;
             }
@@ -144,7 +146,7 @@ class EmailVerificationTest extends TestCase
 
         $url = URL::temporarySignedRoute(
             'verification.verify',
-            now()->addMinutes(10),
+            now()->addMinutes(60),
             [
                 'id'   => $user->id,
                 'hash' => sha1('wrong@email.com'),
@@ -183,7 +185,7 @@ class EmailVerificationTest extends TestCase
 
         $url = URL::temporarySignedRoute(
             'verification.verify',
-            now()->addMinutes(10),
+            now()->addMinutes(60),
             [
                 'id'   => 99999,
                 'hash' => sha1($user->email),
@@ -207,5 +209,19 @@ class EmailVerificationTest extends TestCase
         Event::assertDispatched(Verified::class, function (Verified $event) use ($user): bool {
             return $event->user->id === $user->id;
         });
+    }
+
+    public function test_user_cannot_verify_with_tampered_signature(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => null]);
+
+        $url = $this->makeVerificationUrl($user);
+
+        // 署名を無効なものに置き換えます
+        $tampered = preg_replace('/signature=[^&]+/', 'signature=invalidsignature', $url);
+
+        $this->postJson($tampered)->assertForbidden();
+
+        $this->assertNull($user->fresh()->email_verified_at);
     }
 }

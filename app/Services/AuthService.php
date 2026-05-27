@@ -21,28 +21,19 @@ class AuthService
      */
     public function register(RegisterDTO $dto): User
     {
-        $user = DB::transaction(function () use ($dto) {
+        return DB::transaction(function () use ($dto) {
             $user = User::create([
-                'first_name'    => $dto->first_name,
-                'last_name'     => $dto->last_name,
-                'email'         => $dto->email,
-                'password'      => Hash::make($dto->password),
+                'first_name' => $dto->first_name,
+                'last_name'  => $dto->last_name,
+                'email'      => $dto->email,
+                'password'   => $dto->password,
+                'phone'      => $dto->phone,
             ]);
-
-            if ($dto->address !== null) {
-                $address = $user->addresses()->create(
-                    array_merge($dto->address)
-                );
-
-                $user->update(['default_shipping_address_id' => $address->id]);
-            }
-
+    
+            event(new Registered($user));
+    
             return $user;
         });
-        
-        event(new Registered($user));
-
-        return $user;
     }
 
      /**
@@ -57,9 +48,8 @@ class AuthService
         // future: User::withTrashed() -> for recovering deleted accounts
 
 
-        // ユーザーが存在しない、またはパスワードが一致しない場合は同じエラーを返す
-        // (ユーザー存在の有無を攻撃者に知らせないため)
-        if (! Auth::attempt(['email' => $dto->email, 'password' => $dto->password])) {
+        // ユーザーが存在しない、またはパスワードが一致しない場合は同じエラーを返す。(ユーザー存在の有無を攻撃者に知らせないため)
+        if (! Auth::guard('web')->attempt(['email' => $dto->email, 'password' => $dto->password])) {
             throw ValidationException::withMessages([
                 'email' => __('auth.failed'),
             ]);
@@ -70,7 +60,7 @@ class AuthService
 
         // パスワードハッシュのアップグレード (bcryptコスト変更時など)
         if (Hash::needsRehash($user->password)) {
-            $user->forceFill(['password' => Hash::make($dto->password)])->save();
+            $user->forceFill(['password' => $dto->password])->save();
         }
 
         return $user;
