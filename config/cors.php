@@ -25,6 +25,8 @@ return [
         'X-XSRF-TOKEN',
         'Accept',
         'Origin',
+        'Cookie',
+        'Authorization',
     ],
     'exposed_headers' => [],
     'max_age' => 0,

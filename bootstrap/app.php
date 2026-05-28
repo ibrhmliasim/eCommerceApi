@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Routing\Exceptions\InvalidSignatureException;
@@ -20,7 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
         __DIR__.'/../app/Listeners',
     ])
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->trustProxies(at: '*');
+        $middleware->trustProxies(at: env('TRUSTED_PROXIES', '127.0.0.1'));
 
         $middleware->api(prepend: [
             EnsureFrontendRequestsAreStateful::class,
