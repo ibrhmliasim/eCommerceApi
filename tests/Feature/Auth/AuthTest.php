@@ -197,7 +197,7 @@ class AuthTest extends TestCase
 
         $response = $this
                     ->withSession([])
-                    ->actingAs($user, 'sanctum')
+                    ->actingAs($user, 'web')
                     ->withHeaders([
                          'Accept'  => 'application/json',
                          'Referer' => 'http://localhost:3000',
@@ -226,7 +226,7 @@ class AuthTest extends TestCase
         /** @var User $user */
         $user = User::factory()->create();
 
-        $response = $this->actingAs($user, 'sanctum')
+        $response = $this->actingAs($user, 'web')
                          ->getJson('/api/v1/auth/me');
 
         $response->assertStatus(200)

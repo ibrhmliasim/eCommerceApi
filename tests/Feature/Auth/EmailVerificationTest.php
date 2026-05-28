@@ -66,7 +66,7 @@ class EmailVerificationTest extends TestCase
 
         $user = User::factory()->create(['email_verified_at' => now()]);
 
-        $response = $this->actingAs($user, 'sanctum')
+        $response = $this->actingAs($user, 'web')
             ->postJson('/api/v1/auth/email/resend');
 
         $response->assertStatus(409)
@@ -81,7 +81,7 @@ class EmailVerificationTest extends TestCase
 
         $user = User::factory()->create(['email_verified_at' => null]);
 
-        $response = $this->actingAs($user, 'sanctum')
+        $response = $this->actingAs($user, 'web')
             ->postJson('/api/v1/auth/email/resend');
 
         $response->assertOk()
