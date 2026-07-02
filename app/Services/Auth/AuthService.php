@@ -31,6 +31,11 @@ class AuthService
             ]);
     
             event(new Registered($user));
+
+            // Auto-login: юзер получает доступ к cart/wishlist/profile сразу,
+            // без ожидания email verification. Checkout остаётся защищён
+            // middleware 'verified' на уровне роутинга (см. ADR-8).
+            Auth::login($user);
     
             return $user;
         });
