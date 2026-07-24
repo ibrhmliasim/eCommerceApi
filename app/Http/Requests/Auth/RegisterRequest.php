@@ -25,7 +25,7 @@ class RegisterRequest extends FormRequest
     {
         return [
             'email'      => ['required', 'email', Rule::unique('users', 'email')->whereNull('deleted_at'),],
-            'password'   => ['required', 'string', 'min:8', 'confirmed'],
+            'password'   => ['required', 'string', 'min:8'],
             'phone'      => ['nullable', 'string', 'unique:users,phone'],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name'  => ['required', 'string', 'max:100'],
