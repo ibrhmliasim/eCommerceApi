@@ -4,18 +4,13 @@ namespace App\Services\Auth;
 
 use App\DTOs\Auth\LoginDTO;
 use App\DTOs\Auth\RegisterDTO;
-<<<<<<< HEAD:app/Services/Auth/AuthService.php
-=======
 use App\Models\User;
->>>>>>> origin/develop:app/Services/AuthService.php
 
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Events\Registered;
-
-use App\Jobs\SendWelcomeEmailJob;
 
 class AuthService
 {
@@ -26,7 +21,7 @@ class AuthService
      */
     public function register(RegisterDTO $dto): User
     {
-        return DB::transaction(function () use ($dto) {
+        $user = DB::transaction(function () use ($dto): User {
             $user = User::create([
                 'first_name' => $dto->first_name,
                 'last_name'  => $dto->last_name,
@@ -34,23 +29,18 @@ class AuthService
                 'password'   => $dto->password,
                 'phone'      => $dto->phone,
             ]);
-    
+
             event(new Registered($user));
 
-            // Auto-login: юзер получает доступ к cart/wishlist/profile сразу,
-            // без ожидания email verification. Checkout остаётся защищён
-            // middleware 'verified' на уровне роутинга (см. ADR-8).
+            // 自動ログイン: ユーザーはカート/ウィッシュリスト/プロフィールにすぐにアクセスできます。
+            // 電子メールの検証を待たずに。チェックアウトは引き続き保護されています
+            // ミドルウェアはルーティング レベルで「検証済み」です (ADR-8 を参照)。
             Auth::login($user);
-    
+
             return $user;
         });
-<<<<<<< HEAD:app/Services/Auth/AuthService.php
-=======
-
-        SendWelcomeEmailJob::dispatch($user);
 
         return $user;
->>>>>>> origin/develop:app/Services/AuthService.php
     }
 
      /**
@@ -63,7 +53,6 @@ class AuthService
     public function login(LoginDTO $dto): User
     {
         // future: User::withTrashed() -> for recovering deleted accounts
-
 
         // ユーザーが存在しない、またはパスワードが一致しない場合は同じエラーを返す。(ユーザー存在の有無を攻撃者に知らせないため)
         if (! Auth::guard('web')->attempt(['email' => $dto->email, 'password' => $dto->password])) {

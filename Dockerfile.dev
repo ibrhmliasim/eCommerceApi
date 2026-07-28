@@ -1,0 +1,31 @@
+FROM php:8.4-fpm-alpine
+
+# Системные зависимости под реально используемые расширения:
+# pdo_mysql — Eloquent/MySQL; zip — composer-пакеты; bcmath — точные денежные
+# вычисления (DECIMAL(12,2) в schema_final.sql требует bcmath, а не float).
+RUN apk add --no-cache \
+        libzip-dev \
+        mysql-client \
+        $PHPIZE_DEPS \
+    && docker-php-ext-install pdo pdo_mysql zip bcmath opcache \
+    && apk del $PHPIZE_DEPS
+
+# predis — чистый PHP-клиент (уже в composer.json), ext-redis не требуется.
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www
+
+# Код НЕ копируется сюда — он монтируется как volume в docker-compose.yml.
+# Это дневной dev-образ: правки в коде на хосте видны в контейнере мгновенно,
+# без пересборки образа. Пересборка нужна только при смене PHP-расширений
+# или системных пакетов, а не при обычной разработке.
+
+# composer install выполняется entrypoint-скриптом при старте контейнера,
+# а не здесь — потому что на этом этапе исходники ещё не примонтированы.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 9000
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["php-fpm"]

@@ -1,0 +1,123 @@
+version: "3.8"
+
+# Полный prod-like dev-стек. Заменяет `php artisan serve` + Homebrew MySQL.
+# Next.js фронтенд НЕ включён сюда намеренно — он продолжает работать через
+# `npm run dev` на хосте и обращается к API через опубликованный порт nginx
+# (localhost:8000). Смешивать фронт в этот compose нет смысла: у него другой
+# цикл разработки (Fast Refresh уже есть из коробки).
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: ecommerce_app
+    volumes:
+      - .:/var/www
+      - vendor_data:/var/www/vendor
+    environment:
+      - DB_HOST=mysql
+      - REDIS_HOST=redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Horizon-дашборд (/horizon) и сам API отдаются одним и тем же app-контейнером
+  # через php-fpm — nginx лишь проксирует HTTP. Отдельный порт под Horizon не нужен.
+  nginx:
+    image: nginx:alpine
+    container_name: ecommerce_nginx
+    ports:
+      - "8000:80"
+    volumes:
+      - .:/var/www
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+
+  mysql:
+    image: mysql:8.0
+    container_name: ecommerce_mysql
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-e-commerce-test}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
+    ports:
+      - "3306:3306"   # опционально — чтобы DBeaver с хоста продолжал работать как раньше
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Имитация Supervisor из ADR-5/ADR-9. Отдельный процесс от app,
+  # чтобы падение воркера не убивало обработку HTTP-запросов и наоборот.
+  queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: ecommerce_queue_worker
+    command: ["php", "artisan", "queue:work", "redis", "--queue=default", "--tries=3", "--backoff=5", "--verbose"]
+    volumes:
+      - .:/var/www
+      - vendor_data:/var/www/vendor
+    environment:
+      - DB_HOST=mysql
+      - REDIS_HOST=redis
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Требует `composer require laravel/horizon` перед первым запуском —
+  # ещё не установлен в проекте (проверено в composer.json).
+  horizon:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: ecommerce_horizon
+    command: ["php", "artisan", "horizon"]
+    volumes:
+      - .:/var/www
+      - vendor_data:/var/www/vendor
+    environment:
+      - DB_HOST=mysql
+      - REDIS_HOST=redis
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ecommerce_redis_ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+
+volumes:
+  mysql_data:
+  redis_data:
+  vendor_data:
