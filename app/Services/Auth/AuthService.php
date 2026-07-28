@@ -2,15 +2,20 @@
 
 namespace App\Services\Auth;
 
-use App\Models\User;
 use App\DTOs\Auth\LoginDTO;
 use App\DTOs\Auth\RegisterDTO;
+<<<<<<< HEAD:app/Services/Auth/AuthService.php
+=======
+use App\Models\User;
+>>>>>>> origin/develop:app/Services/AuthService.php
 
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Events\Registered;
+
+use App\Jobs\SendWelcomeEmailJob;
 
 class AuthService
 {
@@ -39,6 +44,13 @@ class AuthService
     
             return $user;
         });
+<<<<<<< HEAD:app/Services/Auth/AuthService.php
+=======
+
+        SendWelcomeEmailJob::dispatch($user);
+
+        return $user;
+>>>>>>> origin/develop:app/Services/AuthService.php
     }
 
      /**
