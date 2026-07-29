@@ -24,11 +24,11 @@ class RegisterRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'first_name' => ['required', 'string', 'max:100'],
+            'last_name'  => ['required', 'string', 'max:100'],
             'email'      => ['required', 'email', Rule::unique('users', 'email')->whereNull('deleted_at'),],
             'password'   => ['required', 'string', 'min:8'],
             'phone'      => ['nullable', 'string', 'unique:users,phone'],
-            'first_name' => ['required', 'string', 'max:100'],
-            'last_name'  => ['required', 'string', 'max:100'],
         ];
     }
 }
