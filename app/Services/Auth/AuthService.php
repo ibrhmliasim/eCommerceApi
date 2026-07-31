@@ -9,7 +9,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
+use App\Exceptions\Auth\InvalidCredentialsException;
 use Illuminate\Auth\Events\Registered;
 
 class AuthService
@@ -48,7 +48,7 @@ class AuthService
      *
      * セッション再生成はHTTPレイヤー（Controller）の責務のため、ここでは行わない。
      *
-     * @throws ValidationException
+     * @throws InvalidCredentialsException
      */
     public function login(LoginDTO $dto): User
     {
@@ -56,9 +56,7 @@ class AuthService
 
         // ユーザーが存在しない、またはパスワードが一致しない場合は同じエラーを返す。(ユーザー存在の有無を攻撃者に知らせないため)
         if (! Auth::guard('web')->attempt(['email' => $dto->email, 'password' => $dto->password])) {
-            throw ValidationException::withMessages([
-                'email' => __('auth.failed'),
-            ]);
+            throw new InvalidCredentialsException();
         }
 
         /** @var User $user */

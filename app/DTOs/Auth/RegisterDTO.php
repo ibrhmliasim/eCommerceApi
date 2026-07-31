@@ -14,6 +14,7 @@ readonly class RegisterDTO
         public string  $password,
         public ?string $phone = null,
     ) {}
+    
     public static function fromRequest(RegisterRequest $request): self
     {
         return new self(
