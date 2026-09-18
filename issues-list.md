@@ -77,7 +77,7 @@ soft-delete сценарий усугубляет проблему.
 
 **Found in:** обсуждение ISSUE-1, чат "Meeting Chat", 2026-07-31
 
-**Status:** Open
+**Status:** See Below
 
 **Проблема:**
 По ADR-8 регистрация не требует verified email — доступ выдаётся сразу
@@ -177,4 +177,59 @@ eCommerceApi/
 
 ## Resolved (архив)
 
-_Пока пусто — записи переезжают сюда с пометкой даты и ссылкой на ADR._
+### ISSUE-2: Незащищённая регистрация позволяет «застолбить» чужой email
+
+**Domain:** Backend (архитектурное решение), затрагивает ADR-7, ADR-8
+
+**Found in:** обсуждение ISSUE-1, чат "Meeting Chat", 2026-07-31
+
+**Status:** Resolved
+
+**Проблема:**
+
+В первоначальной архитектуре (v1) `POST /register` сразу создавал `User` в MySQL до подтверждения email. Это позволяло любому человеку зарегистрироваться на `someone-else@gmail.com`, не имея доступа к этому ящику. Поскольку `users.email` имеет `UNIQUE`-ограничение, такой неверифицированный `User` фактически резервировал email и мог препятствовать регистрации его реального владельца. Дополнительной проблемой был lifecycle таких записей: при незавершённой регистрации `User` оставался в MySQL и требовал отдельной cleanup-логики.
+
+**Почему это важно:**
+
+Старый подход создавал противоречие между soft onboarding и базовым ожиданием пользователя: email считался занятым до того, как было доказано право пользователя на него. Вариант с TTL-cleanup через Cron ограничивал бы время блокировки, но не устранял саму причину: временная регистрация всё равно сначала попадала бы в `users`.
+
+**Решение:**
+
+Проблема устранена переходом на **zero-DB-write pending registration**:
+
+1. `POST /register` не создаёт `User` в MySQL.
+2. Данные регистрации (`email`, `hashed password`, `first_name`, `last_name`, `phone`) временно сохраняются в Redis по ключу `registration:{token}` с TTL.
+3. Для resend используется индекс `registration:email:{email}` → `token`.
+4. Verification URL подписывает `registration token`, а не `user_id`.
+5. До подтверждения email в таблице `users` отсутствует соответствующая запись.
+6. После успешной verification backend создаёт `User` в MySQL уже с `email_verified_at = now()`.
+7. После успешного DB commit pending registration удаляется из Redis.
+8. Если email не подтверждён, Redis TTL автоматически удаляет pending registration.
+
+**Результат:**
+
+Неверифицированная регистрация больше не резервирует email в MySQL.
+Если пользователь указал чужой или несуществующий email и не подтвердил его, после истечения TTL pending registration исчезает автоматически. В MySQL не остаётся `User`, который нужно удалять, чистить или анонимизировать. Таким образом, zero-DB-write устраняет корневую причину ISSUE-2, а не ограничивает её последствия cleanup-механизмом.
+
+**Связанные решения:**
+
+* **ADR-15:** Zero-DB-write pending registration — User создаётся только после verification.
+* **ADR-17:** Гранулярное применение `verified` + guest-first browsing.
+* **ADR-16:** Verification email → Welcome email после создания verified User.
+* **ADR-18:** Session state через `/me`.
+
+**Trade-off (Компромиссы):**
+
+* Redis становится critical path для регистрации.
+* Pending registration содержит `hashed password` в Redis до истечения TTL.
+* Resend требует отдельного Redis email index.
+* Поведение повторного клика по уже использованной verification link требует отдельного решения (`410 Gone` или short-lived `verified:{token}` marker).
+* Риск User Enumeration при `422` для существующего email сохраняется и описан отдельно в ADR-11.
+
+**Связь с ISSUE-1:**
+
+Pending registration в Redis не является аккаунтом и не участвует в Account Restoration. `soft-delete` и `withTrashed()` применяются только к уже существующим verified `User`.
+
+**Статус решения:**
+
+ISSUE-2 закрыт архитектурным переходом на zero-DB-write registration. Дополнительная cleanup-инфраструктура для неверифицированных `User` не требуется.
