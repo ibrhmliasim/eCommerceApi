@@ -1,21 +1,21 @@
-# Auth Module — Audit Decisions
+# Architectural Decision Record — Auth Module
 
 > Covers: Registration, Email Verification, Password Reset, Session Management
 > Stack: Laravel 12, Sanctum SPA, MySQL, Redis
 >
-> **Как читать этот документ (ADR-практика, Michael Nygard):**
+> **Как читать этот документ (AUTH-практика, Michael Nygard):**
 > Записи здесь неизменяемы после принятия. Когда решение пересматривается,
 > старая запись НЕ редактируется и не удаляется — она помечается
-> `Status: Superseded by ADR-N`, а новое решение добавляется как новый
-> ADR с ростущим номером, со ссылкой назад (`Supersedes ADR-N`).
+> `Status: Superseded by AUTH-N`, а новое решение добавляется как новый
+> AUTH с ростущим номером, со ссылкой назад (`Supersedes AUTH-N`).
 > Это сохраняет историю мышления: видно не только "что решено сейчас",
 > но и "что было решено раньше и почему от этого отказались".
 
 ---
 
-## ADR — Architectural Decision Records
+## AUTH — Architectural Decision Records
 
-### ADR-0: Выбор SPA Cookie-based (Stateful) авторизации через Laravel Sanctum
+### AUTH-0: Выбор SPA Cookie-based (Stateful) авторизации через Laravel Sanctum
 
 **Status:** Accepted
 
@@ -53,9 +53,9 @@
 
 ---
 
-### ADR-1: Использование Signed URL с TrustProxies конфигурацией (email verification и password reset) — v1
+### AUTH-1: Использование Signed URL с TrustProxies конфигурацией (email verification и password reset) — v1
 
-**Status:** Superseded by ADR-13
+**Status:** Superseded by AUTH-13
 
 **Выбрали:** Стандартный `URL::temporarySignedRoute` + доверие прокси (`$middleware->trustProxies(at: '*')`).
 
@@ -77,7 +77,7 @@
 
 ---
 
-### ADR-2: POST-only endpoint для верификации email
+### AUTH-2: POST-only endpoint для верификации email
 
 **Status:** Accepted
 
@@ -99,9 +99,9 @@
 
 ---
 
-### ADR-3: Установление времени жизни (TTL) верификационной ссылки в 60 минут — v1
+### AUTH-3: Установление времени жизни (TTL) верификационной ссылки в 60 минут — v1
 
-**Status:** Superseded by ADR-14
+**Status:** Superseded by AUTH-14
 
 **Выбрали:** `now()->addMinutes(60)`
 
@@ -121,9 +121,9 @@
 
 ---
 
-### ADR-4: Архитектурный контракт MustVerifyEmail и ручной диспатч события Registered — v1
+### AUTH-4: Архитектурный контракт MustVerifyEmail и ручной диспатч события Registered — v1
 
-**Status:** Superseded by ADR-15
+**Status:** Superseded by AUTH-15
 
 **Выбрали:**
 Реализация стандартного интерфейса `Illuminate\Contracts\Auth\MustVerifyEmail` на модели `User` в сочетании с явным ручным вызовом `event(new Registered($user))` внутри сервисного слоя (`AuthService`).
@@ -136,7 +136,7 @@
   Это исключает критический баг, когда системный листенер перехватывает событие и пытается отправить письмо, пока транзакция создания пользователя ещё не закрыта. В этот момент фоновый воркер может не найти пользователя в базе данных и упасть с ошибкой `ModelNotFoundException`.
 
 **Чистый контракт модели:**
-Метод `sendEmailVerificationNotification()` переопределён внутри класса `User` только для подмены дефолтного класса нотификации на кастомный `VerifyEmailNotification`, адаптированный под относительные ссылки Next.js (см. ADR-1).
+Метод `sendEmailVerificationNotification()` переопределён внутри класса `User` только для подмены дефолтного класса нотификации на кастомный `VerifyEmailNotification`, адаптированный под относительные ссылки Next.js (см. AUTH-1).
 
 **Trade-off (Компромиссы):**
 Повышается человеческий фактор при расширении API. Если в будущем будет добавлен альтернативный способ регистрации (например, через Socialite / OAuth / Google Sign-In), разработчик обязан не забыть вручную вызвать `event(new Registered($user))` в новом методе — иначе письмо верификации не отправится.
@@ -154,7 +154,7 @@
 
 ---
 
-### ADR-5: Синхронная отправка email-уведомлений на этапе MVP / Разработки
+### AUTH-5: Синхронная отправка email-уведомлений на этапе MVP / Разработки
 
 **Status:** Accepted
 
@@ -182,7 +182,7 @@
 
 ---
 
-### ADR-6: Бизнес-логика verify/resend в контроллере
+### AUTH-6: Бизнес-логика verify/resend в контроллере
 
 **Status:** Accepted
 
@@ -199,9 +199,9 @@
 
 ---
 
-### ADR-7: Одновременная отправка Welcome-письма и ссылки верификации при регистрации — v1
+### AUTH-7: Одновременная отправка Welcome-письма и ссылки верификации при регистрации — v1
 
-**Status:** Superseded by ADR-16
+**Status:** Superseded by AUTH-16
 
 **Выбрали:** Отправка двух независимых уведомлений (`VerifyEmailNotification` и `WelcomeNotification`) сразу в момент наступления события `Registered`.
 
@@ -227,9 +227,9 @@
 
 ---
 
-### ADR-8: Гранулярное применение middleware 'verified' (Изоляция критических бизнес-процессов) — v1
+### AUTH-8: Гранулярное применение middleware 'verified' (Изоляция критических бизнес-процессов) — v1
 
-**Status:** Superseded by ADR-17
+**Status:** Superseded by AUTH-17
 
 **Выбрали:** Точечное (гранулярное) назначение middleware `verified` исключительно на эндпоинты оформления и оплаты заказов, вместо глобальной блокировки сессии пользователя.
 
@@ -258,7 +258,7 @@
 
 ---
 
-### ADR-9: Инвалидация сессий на всех устройствах при смене пароля
+### AUTH-9: Инвалидация сессий на всех устройствах при смене пароля
 
 **Status:** Accepted
 
@@ -285,7 +285,7 @@
 
 ---
 
-### ADR-10: Унификация ответов (Unified Error Messages) на сбросе пароля и защита от атак по сторонним каналам
+### AUTH-10: Унификация ответов (Unified Error Messages) на сбросе пароля и защита от атак по сторонним каналам
 
 **Status:** Accepted
 
@@ -302,7 +302,7 @@
 
 ---
 
-### ADR-11: Допущение User Enumeration на этапе регистрации ради UX и поддержки Soft Deletes
+### AUTH-11: Допущение User Enumeration на этапе регистрации ради UX и поддержки Soft Deletes
 
 **Status:** Accepted
 
@@ -320,15 +320,15 @@
 **Смягчение рисков (Mitigation):**
 
 - **Агрессивный Rate Limiting:** На эндпоинт регистрации накладывается жесткий лимит запросов через Redis — `throttle:10,1` (максимум 10 попыток в минуту на один IP-адрес / сессию). Это делает брутфорс масштабных баз данных экономически и технически неэффективным для атакующего.
-- **Асимметричная защита доменов:** Уязвимость локализована исключительно на этапе регистрации. Эндпоинты сброса пароля (**ADR-10**) при этом остаются полностью защищенными и возвращают универсальные generic-ответы.
+- **Асимметричная защита доменов:** Уязвимость локализована исключительно на этапе регистрации. Эндпоинты сброса пароля (**AUTH-10**) при этом остаются полностью защищенными и возвращают универсальные generic-ответы.
 
-**Примечание:** С переходом на zero-DB-write registration (ADR-17) семантика этого риска сузилась — `422` на `/register` теперь означает существующего активного `User`, а не просто незавершённую регистрацию. Сам факт enumeration-уязвимости остаётся, mitigation не меняется.
+**Примечание:** С переходом на zero-DB-write registration (AUTH-17) семантика этого риска сузилась — `422` на `/register` теперь означает существующего активного `User`, а не просто незавершённую регистрацию. Сам факт enumeration-уязвимости остаётся, mitigation не меняется.
 
 ---
 
-### ADR-12: Игнорирование тела ответа Login/Register — единственный источник правды через `/me` — v1
+### AUTH-12: Игнорирование тела ответа Login/Register — единственный источник правды через `/me` — v1
 
-**Status:** Superseded by ADR-18
+**Status:** Superseded by AUTH-18
 
 **Контекст:**
 `AuthController::login()` и `AuthController::register()` возвращают `UserResource` — тот же самый Resource, который отдаёт `AuthController::me()`. Технически фронтенд получает полные данные пользователя сразу в ответе на `/login` и `/register`, но намеренно их не использует: `sessionApi.login()` и `sessionApi.register()` типизированы как `Promise<void>`.
@@ -358,16 +358,16 @@
 
 > Все записи ниже приняты в ходе пересмотра, вызванного находкой ISSUE-2
 > (`issues-list.md`) — email squatting при мгновенном создании `User`
-> на `POST /register`. Каждая ADR ниже supersedes соответствующую v1-запись
+> на `POST /register`. Каждая AUTH ниже supersedes соответствующую v1-запись
 > выше; см. взаимные ссылки.
 
 ---
 
-### ADR-13: Signed URL подписывает registration token, не user_id
+### AUTH-13: Signed URL подписывает registration token, не user_id
 
-**Status:** Accepted (supersedes ADR-1)
+**Status:** Accepted (supersedes AUTH-1)
 
-**Выбрали:** `URL::temporarySignedRoute` продолжает использоваться как механизм подписи (без изменений в самом Laravel-примитиве), но подписывается **`registration token`**, а не `user_id` — потому что на момент отправки verification-письма `User` в MySQL ещё не существует (см. ADR-15). `registration token` — идентификатор временной записи `registration:{token}` в Redis. `trustProxies` сужен с `at: '*'` до `env('TRUSTED_PROXIES', '127.0.0.1')` — более безопасный дефолт, не доверяющий всем прокси подряд.
+**Выбрали:** `URL::temporarySignedRoute` продолжает использоваться как механизм подписи (без изменений в самом Laravel-примитиве), но подписывается **`registration token`**, а не `user_id` — потому что на момент отправки verification-письма `User` в MySQL ещё не существует (см. AUTH-15). `registration token` — идентификатор временной записи `registration:{token}` в Redis. `trustProxies` сужен с `at: '*'` до `env('TRUSTED_PROXIES', '127.0.0.1')` — более безопасный дефолт, не доверяющий всем прокси подряд.
 
 **Почему (Архитектурные преимущества):**
 
@@ -378,15 +378,15 @@
 **Trade-off (Компромиссы):**
 
 - В письме отправляется полный URL с подписью (`?signature=...`) — тот же риск, что и в v1.
-- **Новое по сравнению с v1:** Pending registration является stateful-состоянием в Redis, поэтому Redis становится частью критического пути регистрации (детали — ADR-15).
+- **Новое по сравнению с v1:** Pending registration является stateful-состоянием в Redis, поэтому Redis становится частью критического пути регистрации (детали — AUTH-15).
 
-**Смягчение рисков (Mitigation):** Без изменений от v1 — Frontend как прокси, POST-only verification (ADR-2), очистка URL через `router.replace`.
+**Смягчение рисков (Mitigation):** Без изменений от v1 — Frontend как прокси, POST-only verification (AUTH-2), очистка URL через `router.replace`.
 
 ---
 
-### ADR-14: TTL верификационной ссылки и pending registration — единый жизненный цикл, 60 минут
+### AUTH-14: TTL верификационной ссылки и pending registration — единый жизненный цикл, 60 минут
 
-**Status:** Accepted (supersedes ADR-3)
+**Status:** Accepted (supersedes AUTH-3)
 
 **Выбрали:** Тот же TTL `60 минут`, но теперь он управляет **двумя** сущностями одновременно: Signed URL (как в v1) И Redis-записью `registration:{token}`.
 
@@ -405,29 +405,29 @@
 - Пользователь должен начать регистрацию заново и получить новую verification link.
 - Пока pending registration ещё существует, пользователь может запросить повторную отправку verification email через `resend`.
 
-**Важно:** TTL `60 минут` относится именно к первичной регистрации и её verification flow. Password reset имеет собственный lifecycle и TTL, который не должен автоматически наследоваться из этого ADR.
+**Важно:** TTL `60 минут` относится именно к первичной регистрации и её verification flow. Password reset имеет собственный lifecycle и TTL, который не должен автоматически наследоваться из этого AUTH.
 
 **Открытый вопрос (не закрыт на момент записи):** поведение `resend` при повторном запросе — продлевается ли TTL, выдаётся ли новый токен взамен старого или оба остаются валидны до истечения общего окна. Требует явного решения перед реализацией `EmailVerificationController::resend()`.
 
 ---
 
-### ADR-15: Zero-DB-write pending registration — User создаётся только после verification
+### AUTH-15: Zero-DB-write pending registration — User создаётся только после verification
 
-**Status:** Accepted (supersedes ADR-4)
+**Status:** Accepted (supersedes AUTH-4)
 
 **Выбрали:**
-`POST /register` больше не создаёт `User` в MySQL и не диспатчит `event(new Registered($user))` — потому что на этом этапе `$user` физически не существует. Вместо этого данные (`email`, `hashed password`, `first_name`, `last_name`, `phone`) временно хранятся в Redis по ключу `registration:{token}` с TTL (ADR-14). Для resend используется дополнительный индекс `registration:email:{email}` → `token`. `User` создаётся в MySQL только после успешной проверки Signed URL, в рамках DB-транзакции, сразу с `email_verified_at = now()`.
+`POST /register` больше не создаёт `User` в MySQL и не диспатчит `event(new Registered($user))` — потому что на этом этапе `$user` физически не существует. Вместо этого данные (`email`, `hashed password`, `first_name`, `last_name`, `phone`) временно хранятся в Redis по ключу `registration:{token}` с TTL (AUTH-14). Для resend используется дополнительный индекс `registration:email:{email}` → `token`. `User` создаётся в MySQL только после успешной проверки Signed URL, в рамках DB-транзакции, сразу с `email_verified_at = now()`.
 
 **Почему (устраняет корневую причину ISSUE-2, а не патчит симптом):**
 
 - v1 полагался на `MustVerifyEmail` + ручной `Registered`-диспатч именно потому, что `User` создавался мгновенно на `/register`. Это и есть источник ISSUE-2: неверифицированная, потенциально чужая запись немедленно резервирует `email` в `UNIQUE`-индексе `users.email`.
 - Zero-DB-write устраняет это полностью: пока email не подтверждён, в `users` нет никакой записи, которую нужно было бы резервировать, чистить или анонимизировать.
-- Redis TTL (ADR-14) автоматически удаляет незавершённую регистрацию — cron для очистки `users` не нужен вообще, в отличие от TTL-cleanup варианта, который рассматривался и был отклонён при разборе ISSUE-2.
+- Redis TTL (AUTH-14) автоматически удаляет незавершённую регистрацию — cron для очистки `users` не нужен вообще, в отличие от TTL-cleanup варианта, который рассматривался и был отклонён при разборе ISSUE-2.
 - Race-condition защита из v1 (`ModelNotFoundException` при преждевременном листенере) снимается сама собой — писать в БД вообще нечего до момента verification.
 
 **Контракт verification:**
 
-- Signed URL (ADR-13) содержит `registration token`, а не `user_id`.
+- Signed URL (AUTH-13) содержит `registration token`, а не `user_id`.
 - Backend проверяет подпись и наличие `registration:{token}` в Redis.
 - В рамках DB transaction создаётся `User` с `email_verified_at = now()`.
 - После успешного commit pending registration удаляется из Redis.
@@ -439,21 +439,21 @@
 - **Redis становится обязательной зависимостью для регистрации** — что в v1 было лишь опциональным ускорением (сессии), теперь это critical path. Недоступность Redis блокирует создание новых аккаунтов целиком.
 - Pending registration содержит hashed password в Redis (не plaintext, но всё же чувствительные данные вне MySQL).
 
-**Граница ответственности:** Без изменений от v1 — `AuthService` → register/login/logout; email verification → отдельный `EmailVerificationController` (ADR-6); pending registration → Redis; user creation → verification flow.
+**Граница ответственности:** Без изменений от v1 — `AuthService` → register/login/logout; email verification → отдельный `EmailVerificationController` (AUTH-6); pending registration → Redis; user creation → verification flow.
 
 **Открытый вопрос (не закрыт на момент записи):** поведение при коллизии двух одновременных регистраций на один email до истечения TTL первой попытки — вторая попытка должна получать `422` (email "занят" первой pending-регистрацией) или перезаписывать `registration:email:{email}` (тем самым отбирая слот)? Оба варианта валидны, поведение не зафиксировано.
 
 ---
 
-### ADR-16: Последовательная отправка verification и welcome email
+### AUTH-16: Последовательная отправка verification и welcome email
 
-**Status:** Accepted (supersedes ADR-7)
+**Status:** Accepted (supersedes AUTH-7)
 
 **Выбрали:** На этапе регистрации отправляется только `VerifyEmailNotification`. `WelcomeNotification` отправляется только после успешного подтверждения email и создания `User`.
 
 **Почему (снимает оба trade-off'а v1, а не просто UX-предпочтение):**
 
-- v1 держал одновременную отправку как единственный вариант в момент записи, с явным триггером на пересмотр: "переход на sequential flow, если верификация будет строго после `User`". ADR-15 делает этот триггер неизбежным — раз `User` физически не существует до verification, `WelcomeNotification` **не может** быть отправлено раньше, чем в v1 боялись "склеивания писем" — сама архитектура закрывает проблему, а не только формулировка темы письма.
+- v1 держал одновременную отправку как единственный вариант в момент записи, с явным триггером на пересмотр: "переход на sequential flow, если верификация будет строго после `User`". AUTH-15 делает этот триггер неизбежным — раз `User` физически не существует до verification, `WelcomeNotification` **не может** быть отправлено раньше, чем в v1 боялись "склеивания писем" — сама архитектура закрывает проблему, а не только формулировка темы письма.
 - Не отправляются Welcome-письма для незавершённых, abandoned registrations — раньше это было UX-пожеланием (v1 mitigation), теперь это гарантия архитектуры (нет `User` → нечему слать Welcome).
 - Уменьшается лишний SMTP-трафик на потенциально фейковые адреса — прямое улучшение над риском "нагрузка на репутацию SMTP-домена" из v1 trade-off.
 
@@ -481,7 +481,7 @@ WelcomeNotification
 
 - Welcome-письмо приходит позже, чем в v1 (было мгновенно, стало — после клика по ссылке).
 - Если пользователь никогда не подтвердит email, Welcome-письмо вообще не будет отправлено — ожидаемое поведение, не баг.
-- Требуется отдельный вызов `WelcomeNotification` внутри verification-flow (не через `Registered`-событие, которое здесь не используется — см. ADR-15).
+- Требуется отдельный вызов `WelcomeNotification` внутри verification-flow (не через `Registered`-событие, которое здесь не используется — см. AUTH-15).
 
 **Граница ответственности:** `VerifyEmailNotification` → отправляется после создания pending registration. `WelcomeNotification` → отправляется только после успешного создания verified `User`.
 
@@ -489,9 +489,9 @@ WelcomeNotification
 
 ---
 
-### ADR-17: Гранулярное применение middleware 'verified' + guest-first browsing
+### AUTH-17: Гранулярное применение middleware 'verified' + guest-first browsing
 
-**Status:** Accepted (supersedes ADR-8)
+**Status:** Accepted (supersedes AUTH-8)
 
 **Почему решение пересмотрено:**
 
@@ -502,11 +502,11 @@ WelcomeNotification
 **Выбрали:**
 
 1. **Guest-first browsing:** Каталог доступен без аккаунта. Wishlist хранится на клиенте (`localStorage`) и не требует backend identity — переносится в аккаунт отдельной задачей при регистрации/логине.
-2. **Zero-DB-write pending registration** — механизм полностью описан в ADR-15.
-3. **Signed URL на registration token** — механизм полностью описан в ADR-13.
+2. **Zero-DB-write pending registration** — механизм полностью описан в AUTH-15.
+3. **Signed URL на registration token** — механизм полностью описан в AUTH-13.
 4. **Session only after verification:** До подтверждения email пользователь не имеет ни `User`, ни сессии. После `POST /register` отображается только сообщение о необходимости проверить почту.
 
-**Обновлённый контракт доступа к API-маршрутам** (заменяет таблицу из ADR-8 v1 целиком — изменилась не только колонка `verified`, но и семантика доступа guest/account):
+**Обновлённый контракт доступа к API-маршрутам** (заменяет таблицу из AUTH-8 v1 целиком — изменилась не только колонка `verified`, но и семантика доступа guest/account):
 
 | Группа маршрутов | Эндпоинты | Кто может | `auth:sanctum` | `verified` | Обоснование |
 |---|---|---|---:|---:|---|
@@ -526,25 +526,25 @@ WelcomeNotification
 
 - **Resend verification:** Больше нельзя опираться на `user_id`, поэтому требуется дополнительный Redis-индекс `registration:email:{email}`.
 - **Повторный клик:** После успешной verification `registration:{token}` удаляется. Поэтому повторный клик не может вернуть прежний `409 email_already_verified` (как было в v1 через идемпотентность `markEmailAsVerified()`). Требуется отдельная обработка — короткоживущий `verified:{token}` marker или `410 Gone`. **Не закрыто на момент записи.**
-- **Redis dependency:** См. ADR-15.
-- **User Enumeration:** Риск из ADR-11 сохраняется в суженном виде — см. примечание там.
+- **Redis dependency:** См. AUTH-15.
+- **User Enumeration:** Риск из AUTH-11 сохраняется в суженном виде — см. примечание там.
 
 **Связь с ISSUE-1 (Account Restoration):** Soft-delete и `withTrashed()` применяются только к уже существующим, верифицированным пользователям. Pending registration в Redis не является аккаунтом и не участвует в логике восстановления.
 
 **Открытые вопросы, не закрытые на момент записи (см. `issues-list.md`):**
 
-- Коллизия двух одновременных регистраций на один email (дублируется из ADR-15).
-- Rate limiting конкретно на `/resend` отдельно от `/register` (ADR-11 покрывает только `/register`).
-- Anonymization vs generated column для `email_active` при будущем soft-delete verified-пользователей (ISSUE-1) — направление намечено (generated column, не anonymization, из-за конфликта с `withTrashed()`), формальный ADR ещё не написан.
+- Коллизия двух одновременных регистраций на один email (дублируется из AUTH-15).
+- Rate limiting конкретно на `/resend` отдельно от `/register` (AUTH-11 покрывает только `/register`).
+- Anonymization vs generated column для `email_active` при будущем soft-delete verified-пользователей (ISSUE-1) — направление намечено (generated column, не anonymization, из-за конфликта с `withTrashed()`), формальный AUTH ещё не написан.
 
 ---
 
-### ADR-18: Session state через `/me` — обновлённый контракт после zero-DB-write
+### AUTH-18: Session state через `/me` — обновлённый контракт после zero-DB-write
 
-**Status:** Accepted (supersedes ADR-12)
+**Status:** Accepted (supersedes AUTH-12)
 
 **Контекст:**
-В v1 `/register` возвращал `UserResource` (тот же, что и `/me`), но фронтенд его игнорировал ради единого источника правды. После перехода на zero-DB-write (ADR-15) это стало не просто архитектурным предпочтением, а необходимостью: `/register` **физически не может** вернуть `UserResource`, потому что `User` на этом этапе не существует — он создаётся только после verification.
+В v1 `/register` возвращал `UserResource` (тот же, что и `/me`), но фронтенд его игнорировал ради единого источника правды. После перехода на zero-DB-write (AUTH-15) это стало не просто архитектурным предпочтением, а необходимостью: `/register` **физически не может** вернуть `UserResource`, потому что `User` на этом этапе не существует — он создаётся только после verification.
 
 **Выбрали:**
 `GET /api/v1/auth/me` остаётся единственным источником истины для текущего authenticated user — сама позиция unchanged от v1, но её обоснование расширяется.
@@ -559,7 +559,7 @@ WelcomeNotification
 
 5. **Новое — совместимость с zero-DB-write регистрацией:** После `/register` пользователь ещё не authenticated в принципе (не просто "мы не используем токен из ответа", а "сессии физически нет"), поэтому frontend не пытается получить `/me` как часть самой регистрации, а показывает pending-state ("проверьте почту"). После verification session создаётся backend впервые, после чего `/me` становится источником актуального `UserResource`.
 
-**Frontend flow (обновлён под ADR-15/17):**
+**Frontend flow (обновлён под AUTH-15/17):**
 
 ```text
 Initial app load
@@ -616,7 +616,7 @@ Authenticated User
 | Автоверификация роботами (Safe Links) | Medium | Next.js перехватывает входящий `GET` и отправляет явный `POST` запрос на backend | Accepted |
 | Replay атака на verification URL | Low | После успешной verification `registration:{token}` удаляется из Redis, поэтому повторное использование того же token не может повторно создать аккаунт | Accepted |
 | Race condition при verification | Low | Создание `User` выполняется внутри DB transaction с уникальным `email`; pending registration удаляется из Redis только после успешного commit | Accepted |
-| Синхронный SMTP блокирует HTTP-поток | Low | Осознанный компромисс ради простоты отладки на этапе разработки и MVP (см. ADR-5) | Accepted |
+| Синхронный SMTP блокирует HTTP-поток | Low | Осознанный компромисс ради простоты отладки на этапе разработки и MVP (см. AUTH-5) | Accepted |
 | Redis недоступен во время регистрации | Medium | Redis является частью critical path; registration не создаётся в MySQL без успешного сохранения pending registration | Accepted |
 | Pending registration содержит hashed password в Redis | Medium | Password хранится только в hashed form, registration имеет короткий TTL, Redis не должен логировать содержимое ключей | Accepted |
 

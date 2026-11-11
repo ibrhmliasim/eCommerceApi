@@ -5,7 +5,7 @@
 >
 > Когда вопрос решён -> оформляется как новый ADR в соответствующем
 > `*-audit-decisions.md` файле, а запись здесь помечается `Resolved`
-> со ссылкой на номер ADR.
+> со ссылкой на номер AUTH.
 >
 > Затрагивает и Backend (Laravel), и Frontend (Next.js) — домен не ограничен auth.
 
@@ -18,7 +18,7 @@
 
 **Domain:** Backend / Frontend / Fullstack
 **Found in:** контекст, где обнаружено (файл, чат, дата)
-**Status:** Open / Decided (-> ADR-X) / Won't Fix
+**Status:** Open / Decided (-> AUTH-X) / Won't Fix
 
 **Проблема:**
 Что именно не так, конкретно.
@@ -51,7 +51,7 @@
 `email VARCHAR(255) NOT NULL UNIQUE` в `schema_final.sql` не знает про
 `deleted_at` и физически заблокирует `INSERT` при попытке — Laravel скажет
 "можно", MySQL скажет "нельзя". Упадёт как 500 (`server.internal_error`),
-хотя по бизнес-логике (ADR-11) это должно быть штатной регистрацией.
+хотя по бизнес-логике (AUTH-11) это должно быть штатной регистрацией.
 
 **Почему это важно:**
 Не гипотетический edge-case — сработает при первой же попытке юзера
@@ -73,14 +73,14 @@ soft-delete сценарий усугубляет проблему.
 
 ### ISSUE-2: Незащищённая регистрация позволяет "застолбить" чужой email
 
-**Domain:** Backend (архитектурное решение), затрагивает ADR-7, ADR-8
+**Domain:** Backend (архитектурное решение), затрагивает AUTH-7, AUTH-8
 
 **Found in:** обсуждение ISSUE-1, чат "Meeting Chat", 2026-07-31
 
 **Status:** See Below
 
 **Проблема:**
-По ADR-8 регистрация не требует verified email — доступ выдаётся сразу
+По AUTH-8 регистрация не требует verified email — доступ выдаётся сразу
 (soft onboarding). Это значит кто угодно может зарегистрироваться на
 `someone-else@gmail.com`, не имея доступа к этому ящику. Пока аккаунт не
 удалён и не верифицирован, реальный владелец email не может создать
@@ -88,15 +88,15 @@ soft-delete сценарий усугубляет проблему.
 регистрации, независимо от soft-delete (ISSUE-1 — лишь один из симптомов).
 
 **Почему это важно:**
-Прямое противоречие между ADR-8 (мягкий онбординг ради UX) и базовым
+Прямое противоречие между AUTH-8 (мягкий онбординг ради UX) и базовым
 ожиданием пользователя ("это мой email, почему я не могу им пользоваться").
 Потенциальный источник support-тикетов и репутационного риска в реальном
 проде.
 
 **Варианты решения:**
 1. Оставить как есть, добавить TTL-cleanup (cron удаляет неверифицированные
-   аккаунты старше N дней) — сохраняет UX ADR-8, ограничивает время блокировки.
-2. Требовать email verification строго до полного доступа (пересмотр ADR-8) —
+   аккаунты старше N дней) — сохраняет UX AUTH-8, ограничивает время блокировки.
+2. Требовать email verification строго до полного доступа (пересмотр AUTH-8) —
    безопаснее, но добавляет трение при регистрации.
 3. Гибрид: доступ сразу (как сейчас), но email considered "reserved, not
    owned" — если verification не пройден за N часов, email освобождается
@@ -179,7 +179,7 @@ eCommerceApi/
 
 ### ISSUE-2: Незащищённая регистрация позволяет «застолбить» чужой email
 
-**Domain:** Backend (архитектурное решение), затрагивает ADR-7, ADR-8
+**Domain:** Backend (архитектурное решение), затрагивает AUTH-7, AUTH-8
 
 **Found in:** обсуждение ISSUE-1, чат "Meeting Chat", 2026-07-31
 
@@ -213,10 +213,10 @@ eCommerceApi/
 
 **Связанные решения:**
 
-* **ADR-15:** Zero-DB-write pending registration — User создаётся только после verification.
-* **ADR-17:** Гранулярное применение `verified` + guest-first browsing.
-* **ADR-16:** Verification email → Welcome email после создания verified User.
-* **ADR-18:** Session state через `/me`.
+* **AUTH-15:** Zero-DB-write pending registration — User создаётся только после verification.
+* **AUTH-17:** Гранулярное применение `verified` + guest-first browsing.
+* **AUTH-16:** Verification email → Welcome email после создания verified User.
+* **AUTH-18:** Session state через `/me`.
 
 **Trade-off (Компромиссы):**
 
@@ -224,7 +224,7 @@ eCommerceApi/
 * Pending registration содержит `hashed password` в Redis до истечения TTL.
 * Resend требует отдельного Redis email index.
 * Поведение повторного клика по уже использованной verification link требует отдельного решения (`410 Gone` или short-lived `verified:{token}` marker).
-* Риск User Enumeration при `422` для существующего email сохраняется и описан отдельно в ADR-11.
+* Риск User Enumeration при `422` для существующего email сохраняется и описан отдельно в AUTH-11.
 
 **Связь с ISSUE-1:**
 
