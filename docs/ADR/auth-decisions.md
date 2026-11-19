@@ -156,7 +156,7 @@
 
 ### AUTH-5: Синхронная отправка email-уведомлений на этапе MVP / Разработки
 
-**Status:** Accepted
+**Status:** Accepted (Revised 2026-11-19: сработал триггер возврата очередей, см. блок Revised ниже)
 
 **Выбрали:** Не использовать `ShouldQueue` в кастомных уведомлениях и выполнять отправку email синхронно (в рамках HTTP-запроса).
 
@@ -179,6 +179,22 @@
 3. Рост нагрузки, при котором синхронная отправка начинает негативно влиять на время ответа и UX.
 
 **Примечание (2026-07-31):** `ShouldQueue` уже реализован на `VerifyEmailNotification`/`WelcomeNotification` с самого начала — при `QUEUE_CONNECTION=sync` интерфейс присутствует архитектурно, но неактивен (job исполняется немедленно в том же процессе). Это не выбор "sync вместо async", а "async путь предусмотрен, но отложенно активируется" — см. `architecture-learnings.md`.
+
+**Revised (2026-11-19): уведомления отправляются через очередь**
+
+**Что изменилось:** Триггер из раздела «Условия возврата очередей» сработал, потому что регистрация теперь зависит от Redis (AUTH-15). `VerifyEmailNotification` и `WelcomeNotification` отправляются через `ShouldQueue` с `QUEUE_CONNECTION=redis`. Синхронный режим остаётся только для тестов (`QUEUE_CONNECTION=sync`).
+
+**Почему:** `POST /register` возвращает `202 Accepted` (AUTH-18), а не ждёт ответа SMTP. Сбой почтового шлюза не должен превращаться в `5xx` на регистрации, когда pending-запись в Redis уже создана.
+
+**Правила:**
+
+- Retry-политика: `$tries = 3`, `$backoff = [10, 30]`. Сбои мониторятся через `failed_jobs`.
+- В payload задания попадают только `email`, `rawToken` и время истечения ссылки. Хеш пароля и остальные данные регистрации в очередь не передаются.
+- Время истечения ссылки фиксируется в момент регистрации, а не вычисляется при выполнении задания. Иначе задержка очереди съест часть окна в 20 минут (AUTH-14).
+- У pending-регистрации нет модели `User`, поэтому уведомление уходит через `Notification::route('mail', $email)`.
+- `rawToken` в `failed_jobs` читаем. Нужна периодическая очистка (`queue:prune-failed`). После TTL токен бесполезен.
+
+**Новый trade-off:** Нужен постоянный worker-процесс (в Docker-окружении из ISSUE-4 это отдельный сервис). Без него письма не отправляются, а `/register` при этом отвечает успехом. Нужен мониторинг очереди. Supervisor или Horizon остаются вариантом на Production.
 
 ---
 
@@ -353,272 +369,1003 @@
 При росте нагрузки, где экономия одного round-trip на login/register становится измеримо значимой (например, высокочастотные повторные авторизации в тестах/интеграциях), можно перейти на `queryClient.setQueryData()` прямо из тела ответа `login`/`register`, оставив `useMeQuery` как fallback для случаев без свежего login-события. На текущем масштабе проекта такая оптимизация преждевременна.
 
 ---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
 
-## V2 — Zero-DB-write Registration Architecture
+# V2 — Zero-DB-write Registration Architecture
 
-> Все записи ниже приняты в ходе пересмотра, вызванного находкой ISSUE-2
-> (`issues-list.md`) — email squatting при мгновенном создании `User`
-> на `POST /register`. Каждая AUTH ниже supersedes соответствующую v1-запись
-> выше; см. взаимные ссылки.
+**Status:** Accepted  
+**Last updated:** 2026-11-19  
+**Related issue:** ISSUE-2 — Email Squatting  
+**Scope:** Backend Registration, Email Verification, Redis, Authentication, Frontend Session Flow
 
 ---
 
-### AUTH-13: Signed URL подписывает registration token, не user_id
+## 1. Overview
 
-**Status:** Accepted (supersedes AUTH-1)
+Этот документ описывает обновлённую архитектуру регистрации и подтверждения email (V2), принятую в результате пересмотра, вызванного ISSUE-2.
 
-**Выбрали:** `URL::temporarySignedRoute` продолжает использоваться как механизм подписи (без изменений в самом Laravel-примитиве), но подписывается **`registration token`**, а не `user_id` — потому что на момент отправки verification-письма `User` в MySQL ещё не существует (см. AUTH-15). `registration token` — идентификатор временной записи `registration:{token}` в Redis. `trustProxies` сужен с `at: '*'` до `env('TRUSTED_PROXIES', '127.0.0.1')` — более безопасный дефолт, не доверяющий всем прокси подряд.
+### 1.1. Проблема исходной архитектуры
 
-**Почему (Архитектурные преимущества):**
+В V1 `POST /register` немедленно создавал `User` в MySQL, после чего отправлялось письмо для подтверждения email.
 
-- Все преимущества v1 (просто, нативно, безопаснее OTP, корректная работа за прокси) сохраняются без изменений.
-- **Разделение ответственности:** Signed URL отвечает за подлинность и срок действия ссылки, а Redis — за временное хранение pending registration до подтверждения email.
-- После успешной верификации registration удаляется из Redis, а `User` создаётся в MySQL уже с подтверждённым email — в одной DB-транзакции.
+Это позволяло любому человеку зарегистрироваться с чужим email-адресом без доступа к почтовому ящику. Поскольку `users.email` защищён `UNIQUE`-индексом, такая регистрация фактически резервировала чужой адрес до подтверждения или удаления записи.
 
-**Trade-off (Компромиссы):**
+### 1.2. Новое архитектурное решение
 
-- В письме отправляется полный URL с подписью (`?signature=...`) — тот же риск, что и в v1.
-- **Новое по сравнению с v1:** Pending registration является stateful-состоянием в Redis, поэтому Redis становится частью критического пути регистрации (детали — AUTH-15).
+V2 использует **Zero-DB-write Registration**:
 
-**Смягчение рисков (Mitigation):** Без изменений от v1 — Frontend как прокси, POST-only verification (AUTH-2), очистка URL через `router.replace`.
+- `POST /register` не создаёт `User` в MySQL.
+- Данные незавершённой регистрации временно хранятся в Redis.
+- Verification-ссылка подписывается через Laravel Signed URL и содержит registration token.
+- `User` создаётся только после успешной проверки подписи и получения pending registration из Redis.
+- При создании `User` сразу устанавливается `email_verified_at`.
+- Sanctum session создаётся только после успешной verification.
 
----
+Таким образом, неподтверждённая регистрация не резервирует email в MySQL.
 
-### AUTH-14: TTL верификационной ссылки и pending registration — единый жизненный цикл, 60 минут
+### 1.3. Основные архитектурные принципы
 
-**Status:** Accepted (supersedes AUTH-3)
-
-**Выбрали:** Тот же TTL `60 минут`, но теперь он управляет **двумя** сущностями одновременно: Signed URL (как в v1) И Redis-записью `registration:{token}`.
-
-**Почему (Баланс безопасности, UX и консистентности — обоснование UX/индустриального стандарта из v1 сохраняется):**
-
-- **Единый жизненный цикл:** Signed URL и Redis-запись `registration:{token}` живут одинаковое время. После истечения TTL ссылка становится недействительной, а pending registration автоматически удаляется из Redis.
-- **Отсутствие cleanup-задач:** Неверифицированные регистрации не попадают в MySQL, поэтому для их удаления не требуется отдельный Cron или scheduled command — прямое улучшение по сравнению с v1, где идемпотентность (`409`) была единственной защитой, а "мусорные" `User`-записи всё равно оставались в БД навсегда при недоведённой до конца верификации.
-
-**Trade-off (Компромиссы):** Тот же риск "окна атаки" в 60 минут, что и в v1.
-
-**Поведение после истечения TTL:**
-
-- `registration:{token}` больше не существует в Redis.
-- Signed URL считается недействительным.
-- Создание `User` не выполняется — при v1 к этому моменту `User` уже существовал бы в БД неверифицированным.
-- Пользователь должен начать регистрацию заново и получить новую verification link.
-- Пока pending registration ещё существует, пользователь может запросить повторную отправку verification email через `resend`.
-
-**Важно:** TTL `60 минут` относится именно к первичной регистрации и её verification flow. Password reset имеет собственный lifecycle и TTL, который не должен автоматически наследоваться из этого AUTH.
-
-**Открытый вопрос (не закрыт на момент записи):** поведение `resend` при повторном запросе — продлевается ли TTL, выдаётся ли новый токен взамен старого или оба остаются валидны до истечения общего окна. Требует явного решения перед реализацией `EmailVerificationController::resend()`.
+1. Zero-DB-write до подтверждения email.
+2. Redis используется для временного хранения pending registration.
+3. Signed URL отвечает за подлинность и срок действия verification-ссылки.
+4. Redis отвечает за состояние незавершённой регистрации и защиту от повторного использования.
+5. MySQL остаётся основным хранилищем подтверждённых пользователей.
+6. `/me` остаётся единственным источником истины для authenticated user.
+7. Пользователь получает сессию только после успешной verification.
 
 ---
 
-### AUTH-15: Zero-DB-write pending registration — User создаётся только после verification
+## 2. Registration Flow
 
-**Status:** Accepted (supersedes AUTH-4)
-
-**Выбрали:**
-`POST /register` больше не создаёт `User` в MySQL и не диспатчит `event(new Registered($user))` — потому что на этом этапе `$user` физически не существует. Вместо этого данные (`email`, `hashed password`, `first_name`, `last_name`, `phone`) временно хранятся в Redis по ключу `registration:{token}` с TTL (AUTH-14). Для resend используется дополнительный индекс `registration:email:{email}` → `token`. `User` создаётся в MySQL только после успешной проверки Signed URL, в рамках DB-транзакции, сразу с `email_verified_at = now()`.
-
-**Почему (устраняет корневую причину ISSUE-2, а не патчит симптом):**
-
-- v1 полагался на `MustVerifyEmail` + ручной `Registered`-диспатч именно потому, что `User` создавался мгновенно на `/register`. Это и есть источник ISSUE-2: неверифицированная, потенциально чужая запись немедленно резервирует `email` в `UNIQUE`-индексе `users.email`.
-- Zero-DB-write устраняет это полностью: пока email не подтверждён, в `users` нет никакой записи, которую нужно было бы резервировать, чистить или анонимизировать.
-- Redis TTL (AUTH-14) автоматически удаляет незавершённую регистрацию — cron для очистки `users` не нужен вообще, в отличие от TTL-cleanup варианта, который рассматривался и был отклонён при разборе ISSUE-2.
-- Race-condition защита из v1 (`ModelNotFoundException` при преждевременном листенере) снимается сама собой — писать в БД вообще нечего до момента verification.
-
-**Контракт verification:**
-
-- Signed URL (AUTH-13) содержит `registration token`, а не `user_id`.
-- Backend проверяет подпись и наличие `registration:{token}` в Redis.
-- В рамках DB transaction создаётся `User` с `email_verified_at = now()`.
-- После успешного commit pending registration удаляется из Redis.
-- Пользователю создаётся сессия только после успешной verification.
-
-**Trade-off (Компромиссы):**
-
-- Отказ от стандартного Laravel registration flow (`Registered` → `SendEmailVerificationNotification`) в пользу собственного pending-registration flow — `MustVerifyEmail` больше не является механизмом первичной регистрации.
-- **Redis становится обязательной зависимостью для регистрации** — что в v1 было лишь опциональным ускорением (сессии), теперь это critical path. Недоступность Redis блокирует создание новых аккаунтов целиком.
-- Pending registration содержит hashed password в Redis (не plaintext, но всё же чувствительные данные вне MySQL).
-
-**Граница ответственности:** Без изменений от v1 — `AuthService` → register/login/logout; email verification → отдельный `EmailVerificationController` (AUTH-6); pending registration → Redis; user creation → verification flow.
-
-**Открытый вопрос (не закрыт на момент записи):** поведение при коллизии двух одновременных регистраций на один email до истечения TTL первой попытки — вторая попытка должна получать `422` (email "занят" первой pending-регистрацией) или перезаписывать `registration:email:{email}` (тем самым отбирая слот)? Оба варианта валидны, поведение не зафиксировано.
-
----
-
-### AUTH-16: Последовательная отправка verification и welcome email
-
-**Status:** Accepted (supersedes AUTH-7)
-
-**Выбрали:** На этапе регистрации отправляется только `VerifyEmailNotification`. `WelcomeNotification` отправляется только после успешного подтверждения email и создания `User`.
-
-**Почему (снимает оба trade-off'а v1, а не просто UX-предпочтение):**
-
-- v1 держал одновременную отправку как единственный вариант в момент записи, с явным триггером на пересмотр: "переход на sequential flow, если верификация будет строго после `User`". AUTH-15 делает этот триггер неизбежным — раз `User` физически не существует до verification, `WelcomeNotification` **не может** быть отправлено раньше, чем в v1 боялись "склеивания писем" — сама архитектура закрывает проблему, а не только формулировка темы письма.
-- Не отправляются Welcome-письма для незавершённых, abandoned registrations — раньше это было UX-пожеланием (v1 mitigation), теперь это гарантия архитектуры (нет `User` → нечему слать Welcome).
-- Уменьшается лишний SMTP-трафик на потенциально фейковые адреса — прямое улучшение над риском "нагрузка на репутацию SMTP-домена" из v1 trade-off.
-
-**Новый flow:**
+### 2.1. Общая последовательность
 
 ```text
-POST /register
-    ↓
-Redis pending registration
-    ↓
-VerifyEmailNotification
-    ↓
-пользователь открывает ссылку
-    ↓
-POST /verify
-    ↓
-создание User + email_verified_at
-    ↓
+Frontend
+   |
+   | POST /register
+   v
+Backend
+   |
+   | Validate registration data
+   v
+Redis
+   |
+   | Store pending registration (TTL 20 min)
+   v
+Queue
+   |
+   | VerifyEmailNotification
+   v
+User opens verification link
+   |
+   v
+Frontend /auth/verify-email
+   |
+   | POST /verify
+   v
+Backend
+   |
+   | Validate Signed URL
+   | GETDEL pending registration
+   v
+DB Transaction
+   |
+   | Create User
+   | Set email_verified_at = now()
+   v
+Redis
+   |
+   | Delete email index
+   v
 WelcomeNotification
-    ↓
-создание session
+   |
+   v
+Create Sanctum Session
+   |
+   v
+Frontend
+   |
+   | Invalidate /me
+   v
+Authenticated User
 ```
 
-**Trade-off (Компромиссы):**
+### 2.2. Поведение на каждом этапе
 
-- Welcome-письмо приходит позже, чем в v1 (было мгновенно, стало — после клика по ссылке).
-- Если пользователь никогда не подтвердит email, Welcome-письмо вообще не будет отправлено — ожидаемое поведение, не баг.
-- Требуется отдельный вызов `WelcomeNotification` внутри verification-flow (не через `Registered`-событие, которое здесь не используется — см. AUTH-15).
-
-**Граница ответственности:** `VerifyEmailNotification` → отправляется после создания pending registration. `WelcomeNotification` → отправляется только после успешного создания verified `User`.
-
-**Когда пересматривать:** Без изменений от v1 — CRM integration, бонусы, marketing automation могут потребовать выноса в отдельный application service/event-driven flow.
-
----
-
-### AUTH-17: Гранулярное применение middleware 'verified' + guest-first browsing
-
-**Status:** Accepted (supersedes AUTH-8)
-
-**Почему решение пересмотрено:**
-
-- **ISSUE-2 (`issues-list.md`):** Создание `User` до подтверждения email (v1) позволяло любому человеку зарегистрироваться на `someone-else@gmail.com` без доступа к этому ящику. Уникальный индекс `users.email` фактически резервировал чужой адрес до удаления записи.
-- **Проблема TTL-cleanup:** Рассматривался вариант удаления неверифицированных аккаунтов через Cron — отклонён, т.к. лишь ограничивал время блокировки, оставляя временные регистрации в `users` и требуя отдельной cleanup-инфраструктуры.
-- **Account Restoration:** Такой подход пересекался бы с логикой soft-delete и будущего восстановления аккаунтов через `withTrashed()` (ISSUE-1).
-
-**Выбрали:**
-
-1. **Guest-first browsing:** Каталог доступен без аккаунта. Wishlist хранится на клиенте (`localStorage`) и не требует backend identity — переносится в аккаунт отдельной задачей при регистрации/логине.
-2. **Zero-DB-write pending registration** — механизм полностью описан в AUTH-15.
-3. **Signed URL на registration token** — механизм полностью описан в AUTH-13.
-4. **Session only after verification:** До подтверждения email пользователь не имеет ни `User`, ни сессии. После `POST /register` отображается только сообщение о необходимости проверить почту.
-
-**Обновлённый контракт доступа к API-маршрутам** (заменяет таблицу из AUTH-8 v1 целиком — изменилась не только колонка `verified`, но и семантика доступа guest/account):
-
-| Группа маршрутов | Эндпоинты | Кто может | `auth:sanctum` | `verified` | Обоснование |
-|---|---|---|---:|---:|---|
-| **Public Catalog** | `GET /products`, `/categories` | Guest + Account | — | — | Доступно всем, включая SEO-роботов. |
-| **Wishlist (guest)** | `localStorage` | Guest | — | — | Не требует личности пользователя; перенос в аккаунт — отдельная задача. |
-| **Registration & Verify** | `/register`, `/verify`, `/resend` | Guest → Account | ❌ | ❌ | Работают с Redis pending registration, а не с `users`. |
-| **Login** | `/login` | Account | ❌ | ❌ | Требует существующего, то есть уже верифицированного, `User`. |
-| **Session & Profile** | `GET /me`, `POST /logout`, `/profile/edit` | Account | ✅ | ❌* | Неверифицированного `User` в MySQL больше не существует; сессия выдаётся только после verification. |
-| **Cart Operations** | `GET/POST /cart` | Account | ✅ | ❌* | Доступно только существующим пользователям, которые уже прошли verification. |
-| **Checkout & Financials** | `POST /checkout`, `/orders`, `/payments` | Account | ✅ | ✅ | **Критическая зона.** Проведение транзакций разрешено только верифицированным пользователям. |
-
-\* `verified` фактически избыточен для `/me`, `/logout`, `/profile` и `/cart`, поскольку по архитектуре любой существующий `User` уже имеет подтверждённый email. Middleware может оставаться как defense-in-depth, но не является механизмом первичной защиты.
-
-**Ключевое отличие от v1:** в v1 "Cart Operations" была отдельным пунктом "не требует verified" именно потому, что было чего требовать — гостю разрешалось наполнять корзину без аккаунта вообще (не указано явно в таблице v1, но подразумевалось soft onboarding'ом). В v2 корзина требует `auth:sanctum` — гостевые действия (wishlist, browsing) полностью вынесены на клиент, что делает "мусорные записи в БД от неверифицированных пользователей" (trade-off v1) неприменимыми: мусора создавать некому, пока `User` не существует.
-
-**Trade-off (Компромиссы):**
-
-- **Resend verification:** Больше нельзя опираться на `user_id`, поэтому требуется дополнительный Redis-индекс `registration:email:{email}`.
-- **Повторный клик:** После успешной verification `registration:{token}` удаляется. Поэтому повторный клик не может вернуть прежний `409 email_already_verified` (как было в v1 через идемпотентность `markEmailAsVerified()`). Требуется отдельная обработка — короткоживущий `verified:{token}` marker или `410 Gone`. **Не закрыто на момент записи.**
-- **Redis dependency:** См. AUTH-15.
-- **User Enumeration:** Риск из AUTH-11 сохраняется в суженном виде — см. примечание там.
-
-**Связь с ISSUE-1 (Account Restoration):** Soft-delete и `withTrashed()` применяются только к уже существующим, верифицированным пользователям. Pending registration в Redis не является аккаунтом и не участвует в логике восстановления.
-
-**Открытые вопросы, не закрытые на момент записи (см. `issues-list.md`):**
-
-- Коллизия двух одновременных регистраций на один email (дублируется из AUTH-15).
-- Rate limiting конкретно на `/resend` отдельно от `/register` (AUTH-11 покрывает только `/register`).
-- Anonymization vs generated column для `email_active` при будущем soft-delete verified-пользователей (ISSUE-1) — направление намечено (generated column, не anonymization, из-за конфликта с `withTrashed()`), формальный AUTH ещё не написан.
+| Этап | Действие | Результат |
+|---|---|---|
+| Registration | Валидация данных | Данные готовы к сохранению |
+| Pending registration | Запись в Redis | В MySQL ничего не создаётся |
+| Email notification | Отправка verification-письма | Пользователь получает ссылку |
+| Verification | Проверка Signed URL и Redis token | Подтверждение регистрации |
+| User creation | Создание записи в DB transaction | User сразу verified |
+| Session | Создание Sanctum session | Пользователь authenticated |
+| Frontend | Обновление `/me` | Получение актуального UserResource |
 
 ---
 
-### AUTH-18: Session state через `/me` — обновлённый контракт после zero-DB-write
+## 3. Architecture Decisions
 
-**Status:** Accepted (supersedes AUTH-12)
+Каждое решение ниже supersedes соответствующую запись V1. Исторические формулировки и отменённые варианты не являются частью актуального контракта.
 
-**Контекст:**
-В v1 `/register` возвращал `UserResource` (тот же, что и `/me`), но фронтенд его игнорировал ради единого источника правды. После перехода на zero-DB-write (AUTH-15) это стало не просто архитектурным предпочтением, а необходимостью: `/register` **физически не может** вернуть `UserResource`, потому что `User` на этом этапе не существует — он создаётся только после verification.
+### AUTH-13: Signed URL подписывает registration token, а не user_id
 
-**Выбрали:**
-`GET /api/v1/auth/me` остаётся единственным источником истины для текущего authenticated user — сама позиция unchanged от v1, но её обоснование расширяется.
+**Status:** Accepted  
+**Supersedes:** AUTH-1
 
-- `sessionApi.login()` не использует `UserResource` из response body (как и в v1).
-- `sessionApi.register()` **не ожидает** `UserResource` вообще — не "игнорирует" (как в v1), а типизирован под ответ вида `{ message: string }` ("проверьте почту").
-- После успешного login frontend обновляет состояние через `useMeQuery` (как в v1).
-- После успешной email verification frontend также обновляет состояние через `useMeQuery` — новый кейс, которого не было в v1 (verification раньше не создавала сессию впервые, а лишь помечала существующего `User`).
-- При первоначальной загрузке приложения frontend всегда проверяет `/me` (как в v1).
+#### Decision
 
-**Почему (аргументы 1–4 из v1 остаются в силе без изменений — устойчивость к повторным визитам, консистентность между вкладками, защита от гонки состояний, простота инвалидации):**
+Продолжаем использовать Laravel `URL::temporarySignedRoute`, но вместо `user_id` подписываем **registration token**.
 
-5. **Новое — совместимость с zero-DB-write регистрацией:** После `/register` пользователь ещё не authenticated в принципе (не просто "мы не используем токен из ответа", а "сессии физически нет"), поэтому frontend не пытается получить `/me` как часть самой регистрации, а показывает pending-state ("проверьте почту"). После verification session создаётся backend впервые, после чего `/me` становится источником актуального `UserResource`.
+Причина: во время отправки verification-письма `User` в MySQL ещё не существует (AUTH-15).
 
-**Frontend flow (обновлён под AUTH-15/17):**
+Registration token идентифицирует временную запись в Redis.
+
+Signed URL отвечает за:
+
+- Подлинность verification-ссылки.
+- Защиту от изменения параметров URL.
+- Проверку срока действия ссылки.
+
+Redis отвечает за существование и состояние pending registration.
+
+#### Proxy configuration
+
+`trustProxies` сужен с `at: '*'` до:
+
+```php
+env('TRUSTED_PROXIES', '127.0.0.1')
+```
+
+Это более безопасный дефолт, который не доверяет всем прокси подряд.
+
+#### Security requirements
+
+- Frontend выступает промежуточной страницей для verification.
+- Verification выполняется через POST, а не автоматически через GET.
+- После обработки ссылки Frontend очищает URL через `router.replace`.
+- Redis хранит только hash registration token, а не raw token.
+
+#### Trade-offs
+
+- В письме отправляется полный Signed URL с подписью (`?signature=...`).
+- Redis становится обязательной зависимостью регистрации, а не просто дополнительным хранилищем.
+
+---
+
+### AUTH-14: Единый TTL для Signed URL и pending registration — 20 минут
+
+**Status:** Accepted  
+**Supersedes:** AUTH-3  
+**Last revised:** 2026-11-19
+
+#### Decision
+
+TTL первичной регистрации составляет **20 минут**.
+
+Один config value управляет сроком действия двух сущностей:
+
+1. Laravel Signed URL.
+2. Redis pending registration.
+
+Это исключает ситуацию, когда ссылка ещё действительна, но Redis-запись уже удалена, или наоборот.
+
+#### Why 20 minutes?
+
+- Сокращает окно потенциальной атаки по сравнению с 60 минутами.
+- Даёт пользователю достаточно времени, чтобы открыть почту и подтвердить регистрацию.
+- Покрывает возможные задержки доставки email.
+- Сокращает время хранения незавершённых регистраций и hashed passwords в Redis.
+- Не требует отдельного Cron или scheduled command для очистки незавершённых регистраций.
+
+#### Expiration behavior
+
+После истечения TTL:
+
+- Redis key `registration:{sha256(rawToken)}` автоматически удаляется.
+- Signed URL становится недействительным.
+- `User` не создаётся.
+- Повторное использование ссылки возвращает `410 Gone`.
+- Пользователю необходимо начать регистрацию заново.
+
+#### Resend
+
+Для повторной отправки письма предусмотрены:
+
+- Cooldown: **60 секунд**.
+- Перевыпуск registration token.
+- Удаление старого pending key.
+- Создание нового pending key с полным TTL в 20 минут.
+
+Если pending registration уже истёк, resend невозможен — пользователь должен зарегистрироваться заново.
+
+#### Scope
+
+TTL в 20 минут относится только к первичной регистрации и verification flow.
+
+Password reset имеет собственный lifecycle и TTL.
+
+---
+
+### AUTH-15: Zero-DB-write pending registration
+
+**Status:** Accepted  
+**Supersedes:** AUTH-4  
+**Last revised:** 2026-11-19
+
+#### Decision
+
+`POST /register` больше не создаёт `User` в MySQL и не диспатчит:
+
+```php
+event(new Registered($user));
+```
+
+На этом этапе `User` физически не существует.
+
+Вместо этого регистрационные данные временно сохраняются в Redis.
+
+`User` создаётся в MySQL только после успешной verification.
+
+При создании сразу устанавливается:
+
+```php
+email_verified_at = now()
+```
+
+#### Pending registration data
+
+Redis временно хранит:
+
+- `email`
+- `hashed password`
+- `first_name`
+- `last_name`
+- `phone`
+
+Пароль хранится только в виде hash, не plaintext.
+
+#### Redis key structure
+
+**1. Main pending registration key**
 
 ```text
-Initial app load
-      ↓
+registration:{sha256(rawToken)}
+```
+
+Value:
+
+```text
+email
+hashed_password
+first_name
+last_name
+phone
+```
+
+TTL: 20 минут.
+
+**2. Email index**
+
+```text
+registration:email:{email_hash}
+```
+
+Value:
+
+```text
+token_hash
+```
+
+TTL: 20 минут.
+
+Индекс используется для resend и cooldown.
+
+Открытый email не используется непосредственно в имени ключа.
+
+**3. Token handling**
+
+- Raw token передаётся только в verification URL.
+- Redis хранит только SHA-256 hash токена.
+- Redis dump не содержит рабочих verification-ссылок.
+
+#### Verification process
+
+Порядок операций:
+
+```text
+1. Validate Signed URL
+
+2. GETDEL registration:{sha256(rawToken)}
+   |
+   |-- null → 410 Gone
+   |
+   v
+
+3. DB::transaction
+   |
+   |-- Create User
+   |-- Set email_verified_at = now()
+   |
+   v
+
+4. DEL registration:email:{email_hash}
+   |
+   v
+
+5. WelcomeNotification
+
+6. Create Sanctum session
+```
+
+#### Why GETDEL before commit?
+
+Используется `GETDEL`, а не обычный `GET` с последующим `DEL`.
+
+`GETDEL` атомарно получает и удаляет Redis key.
+
+Это гарантирует, что при двух одновременных verification-запросах только один получит pending registration.
+
+Второй запрос получит `null` и завершится с `410 Gone`.
+
+Это закрывает replay и race-condition при повторном использовании ссылки.
+
+#### Accepted trade-off
+
+Если MySQL завершится ошибкой после успешного `GETDEL`, pending registration уже будет удалён.
+
+Пользователю придётся пройти регистрацию заново.
+
+Это осознанный компромисс: атомарная защита от повторного использования ссылки важнее восстановления редкого неудачного сценария.
+
+#### Email uniqueness
+
+`UNIQUE`-индекс `users.email` остаётся финальным барьером.
+
+Если при создании User возникает `UniqueConstraintViolationException`, это означает, что email уже был подтверждён другим flow.
+
+Пользователь получает нейтральное сообщение в рамках AUTH-11.
+
+#### Email index cleanup
+
+Удаление `registration:email:{email_hash}` выполняется после успешного DB commit.
+
+Если удаление индекса завершится ошибкой, это не критично.
+
+Основной pending key является источником истины.
+
+Resend и cooldown сначала проверяют существование основного key. Если его нет, email index считается устаревшим.
+
+#### Registration collision: last registration wins
+
+Если несколько регистраций используют один email, действует принцип:
+
+**Последняя регистрация побеждает.**
+
+Новая регистрация или resend:
+
+1. Выпускает новый token.
+2. Удаляет старый основной pending key.
+3. Перезаписывает email index новым token hash.
+4. Создаёт новый pending key с TTL 20 минут.
+
+#### Why not return 422?
+
+Если вторая регистрация получала бы `422`, атакующий мог бы занять чужой email на 20 минут и блокировать настоящего владельца.
+
+При стратегии last registration wins ссылка атакующего перестаёт работать, когда настоящий владелец регистрируется самостоятельно.
+
+#### Residual risk
+
+Атакующий всё ещё может перезаписывать pending registration настоящего владельца.
+
+Смягчение:
+
+- Cooldown по `email_hash`.
+- Rate limit по IP.
+- Email содержит сообщение:
+
+> Если вы не регистрировались, проигнорируйте это письмо.
+
+#### Queue payload
+
+Payload verification email job содержит только:
+
+- `email`
+- `rawToken`
+- Время истечения ссылки.
+
+Password и остальные регистрационные данные в queue payload не передаются.
+
+#### Redis dependency
+
+Redis является обязательной зависимостью регистрации.
+
+Если Redis недоступен, регистрация завершается ошибкой `5xx`.
+
+Создание аккаунта без pending registration не допускается.
+
+---
+
+### AUTH-16: Sequential verification and welcome emails
+
+**Status:** Accepted  
+**Supersedes:** AUTH-7
+
+#### Decision
+
+Письма отправляются последовательно.
+
+На этапе регистрации отправляется только:
+
+```text
+VerifyEmailNotification
+```
+
+После успешной verification и создания User отправляется:
+
+```text
+WelcomeNotification
+```
+
+#### New notification flow
+
+```text
+POST /register
+      |
+      v
+Redis pending registration
+      |
+      v
+VerifyEmailNotification
+      |
+      v
+User opens verification link
+      |
+      v
+POST /verify
+      |
+      v
+Create User + email_verified_at
+      |
+      v
+WelcomeNotification
+      |
+      v
+Create session
+```
+
+#### Why sequential?
+
+- Welcome email не отправляется для незавершённых регистраций.
+- Снижается лишний SMTP-трафик на потенциально фейковые адреса.
+- Не требуется отправлять Welcome до существования User.
+- Архитектура сама гарантирует правильный порядок отправки.
+
+#### Implementation requirements
+
+`WelcomeNotification` должна явно отправляться внутри verification flow после успешного создания User.
+
+Она не должна зависеть от стандартного `Registered` event, поскольку этот event больше не используется для первичной регистрации (AUTH-15).
+
+#### Trade-offs
+
+- Welcome email приходит позже — после подтверждения адреса.
+- Если пользователь никогда не подтвердит email, Welcome email не отправляется.
+- Verification flow получает дополнительную ответственность за отправку WelcomeNotification.
+
+---
+
+### AUTH-17: Guest-first browsing and granular middleware
+
+**Status:** Accepted  
+**Supersedes:** AUTH-8
+
+#### Decision
+
+Приложение использует guest-first browsing.
+
+Пользователь может просматривать каталог без аккаунта.
+
+Wishlist хранится на клиенте в `localStorage` и не требует backend identity.
+
+Перенос wishlist в аккаунт после регистрации или логина рассматривается как отдельная задача.
+
+#### Registration and authentication principles
+
+1. Pending registration хранится в Redis (AUTH-15).
+2. Signed URL использует registration token (AUTH-13).
+3. До verification не существует ни `User`, ни Sanctum session.
+4. После успешной verification создаётся User и session.
+5. Каталог доступен гостям.
+
+#### API middleware matrix
+
+| Route group | Endpoints | Access | `auth:sanctum` | `verified` |
+|---|---|---|---|---|
+| Public Catalog | `GET /products`, `/categories` | Guest + Account | No | No |
+| Wishlist | `localStorage` | Guest | No | No |
+| Registration & Verify | `/register`, `/verify`, `/resend` | Guest | No | No |
+| Login | `/login` | Guest | No | No |
+| Session & Profile | `/me`, `/logout`, `/profile/edit` | Account | Yes | No* |
+| Cart Operations | `/cart` | Account | Yes | No* |
+| Checkout & Financials | `/checkout`, `/orders`, `/payments` | Account | Yes | Yes |
+
+#### Middleware explanation
+
+**Public Catalog**
+
+Доступен всем, включая SEO-роботов.
+
+**Registration & Verify**
+
+Работают с Redis pending registration, а не с `users`.
+
+Не требуют `auth:sanctum` или `verified`.
+
+**Login**
+
+Требует существующего User.
+
+Поскольку User создаётся только после verification, любой существующий аккаунт уже имеет подтверждённый email.
+
+**Session, Profile and Cart**
+
+Требуют `auth:sanctum`.
+
+`verified` технически избыточен, поскольку неверифицированного User в MySQL не существует.
+
+Его можно оставить как defense-in-depth.
+
+**Checkout & Financials**
+
+Требуют одновременно:
+
+```text
+auth:sanctum
+verified
+```
+
+Это критическая зона, поэтому дополнительная проверка сохраняется.
+
+#### Account restoration
+
+Soft-delete и `withTrashed()` применяются только к уже существующим, подтверждённым пользователям.
+
+Pending registration в Redis не является аккаунтом и не участвует в логике восстановления.
+
+#### Relationship with ISSUE-1
+
+Решение также исключает необходимость удалять или анонимизировать незавершённые регистрации в MySQL.
+
+Вопросы soft-delete и уникальности email для уже существующих пользователей остаются отдельной задачей ISSUE-1.
+
+---
+
+### AUTH-18: Session state through `/me`
+
+**Status:** Accepted  
+**Supersedes:** AUTH-12  
+**Last revised:** 2026-11-19
+
+#### Decision
+
+`GET /api/v1/auth/me` остаётся единственным источником истины для текущего authenticated user.
+
+Frontend не должен самостоятельно определять состояние пользователя на основе response от login или registration.
+
+TanStack Query хранит server state.
+
+Zustand не используется как источник истины для User.
+
+#### API response contracts
+
+**Login**
+
+`sessionApi.login()` выполняет login.
+
+После успешного ответа frontend инвалидирует и повторно запрашивает `/me`.
+
+**Register**
+
+`POST /register` не возвращает `UserResource`.
+
+Response:
+
+```json
+{
+  "message": "Please check your email to verify your account."
+}
+```
+
+HTTP status:
+
+```text
+202 Accepted
+```
+
+`202` используется потому, что verification email отправляется через очередь, и на момент ответа его отправка ещё не завершена.
+
+`sessionApi.register()` типизирован под:
+
+```ts
+{
+  message: string;
+}
+```
+
+После регистрации frontend переходит в состояние `pending verification`, а не `authenticated`.
+
+**Verification**
+
+Успешный `POST /verify`:
+
+1. Создаёт User.
+2. Создаёт Sanctum session.
+3. Возвращает успешный response.
+
+После этого frontend инвалидирует и повторно запрашивает `/me`.
+
+#### Frontend session flow
+
+```text
+INITIAL APP LOAD
+      |
+      v
 GET /me
-      ↓
-401 → Guest
-200 → Authenticated User
+      |
+      |-- 401 → Guest
+      |
+      |-- 200 → Authenticated User
 
 
+LOGIN
+      |
+      v
 POST /login
-      ↓
+      |
+      v
 Sanctum session
-      ↓
-invalidate/refetch /me
-      ↓
+      |
+      v
+Invalidate / refetch /me
+      |
+      v
 Authenticated User
 
 
+REGISTER
+      |
+      v
 POST /register
-      ↓
-Redis pending registration
-      ↓
-Guest + "Check your email"
+      |
+      v
+202 Accepted
+      |
+      v
+Pending Verification
+      |
+      v
+Show "Check your email"
 
 
+EMAIL VERIFICATION
+      |
+      v
+Frontend /auth/verify-email
+      |
+      v
 POST /verify
-      ↓
+      |
+      v
 User created + Sanctum session
-      ↓
-invalidate/refetch /me
-      ↓
+      |
+      v
+Invalidate / refetch /me
+      |
+      v
 Authenticated User
 ```
 
-**Trade-off (Компромиссы):**
+#### Verification page
 
-- Дополнительный `GET /me` после login и **теперь также** после verification (в v1 такого кейса не было — trade-off вырос на одну точку).
-- `/register` больше не возвращает `UserResource` вообще (в v1 — возвращал, но игнорировался). Frontend должен обрабатывать registration как отдельный `pending verification` state — новое требование по сравнению с v1, где после `/register` фронт сразу мог считать пользователя authenticated (просто перепроверял через `/me`).
+Ссылка из письма ведёт на frontend:
 
-**Граница ответственности:** Без изменений от v1 — Auth mutations выполняют действие; `/me` сообщает текущее состояние; TanStack Query хранит server state; Zustand не используется как источник истины для `User`.
+```text
+/auth/verify-email
+```
 
-**Когда пересматривать:** Без изменений от v1.
+При mount страница выполняет:
+
+```text
+POST /verify
+```
+
+GET-запрос на frontend-страницу сам по себе не должен подтверждать регистрацию.
+
+Это защищает от автоматического открытия ссылок почтовыми сканерами и Safe Links.
+
+#### Error handling
+
+| Scenario | Backend response | Frontend behavior |
+|---|---|---|
+| Successful verification | Success | Invalidate `/me` |
+| Expired link | `410 Gone` | Предложить вернуться к регистрации |
+| Already used link | `410 Gone` | Предложить вернуться к регистрации |
+| Resend cooldown | Rate limit response | Показать таймер ожидания |
+| Registration accepted | `202 Accepted` | Показать pending verification |
+
+#### Why `/me` remains the source of truth
+
+- Сохраняется консистентность состояния между вкладками.
+- Повторные визиты корректно восстанавливают session state.
+- Frontend не зависит от UserResource в mutation responses.
+- Упрощается инвалидация и обновление состояния.
+- После verification backend впервые создаёт session, а `/me` возвращает актуальный UserResource.
+
+#### Trade-offs
+
+- После login и verification требуется дополнительный `GET /me`.
+- Registration теперь имеет отдельное frontend-состояние `pending verification`.
+- После `POST /register` пользователь не считается authenticated.
+
+---
+
+## 4. Redis Lifecycle and Security
+
+### 4.1. Key lifecycle
+
+| Key | Purpose | TTL |
+|---|---|---|
+| `registration:{sha256(rawToken)}` | Pending registration data | 20 minutes |
+| `registration:email:{email_hash}` | Resend and cooldown index | 20 minutes |
+
+### 4.2. Token security
+
+- Raw token существует только в verification URL и queue payload.
+- Redis хранит только hash token.
+- Verification URL подписывается Laravel Signed URL.
+- После успешного получения pending registration используется атомарный `GETDEL`.
+- Повторная verification не может повторно получить данные.
+
+### 4.3. Email index consistency
+
+Основной pending key является источником истины.
+
+Email index используется только для поиска pending registration по email и управления resend/cooldown.
+
+Если основной key отсутствует, email index считается устаревшим и не должен блокировать регистрацию.
+
+### 4.4. Accepted Redis trade-offs
+
+- Redis является critical dependency регистрации.
+- При недоступности Redis регистрация невозможна.
+- При MySQL failure после `GETDEL` пользователь должен зарегистрироваться заново.
+- Hashed password временно хранится в Redis до истечения TTL или verification.
+
+---
+
+## 5. Security and Accepted Risks
+
+| Risk | Mitigation / Decision |
+|---|---|
+| Email squatting / pre-hijacking | User не создаётся до verification |
+| Replay attack | Atomic `GETDEL` |
+| Token leakage through Redis dump | Redis stores token hash only |
+| Concurrent verification | `GETDEL` гарантирует получение данных только одним запросом |
+| Registration collision | Last registration wins |
+| Email bombing | IP rate limit + email hash cooldown |
+| Fake registration | Verification email required |
+| SMTP traffic from abandoned registrations | Welcome email отправляется только после verification |
+| Redis outage | Registration fails; User не создаётся |
+| MySQL failure after GETDEL | Пользователь проходит регистрацию заново |
+| Safe Links / email scanners | Frontend GET page + explicit POST verification |
+| User enumeration | Нейтральные ответы в рамках AUTH-11 |
+
+### 5.1. Logging requirements
+
+Необходимо избегать записи чувствительных данных в application logs:
+
+- Redis payload.
+- Password hash.
+- Raw registration token.
+- Verification URL и query parameters.
+
+Особое внимание необходимо уделить логированию request body и URL query string.
+
+### 5.2. Queue considerations
+
+- Verification email job содержит только `email`, `rawToken` и expiry time.
+- Password не должен попадать в queue payload.
+- `rawToken` в queue payload и `failed_jobs` является принятым остаточным риском: токен ограничен TTL и после истечения срока бесполезен.
+
+---
+
+## 6. Responsibility Boundaries
+
+| Component | Responsibility |
+|---|---|
+| `AuthService` | Register, login, logout |
+| `EmailVerificationController` | Verification flow |
+| Pending Registration | Временное хранение данных в Redis |
+| Redis | Pending registration lifecycle |
+| MySQL | Хранение подтверждённых пользователей |
+| `VerifyEmailNotification` | Отправка verification email |
+| `WelcomeNotification` | Отправка welcome email после verification |
+| Sanctum | Session authentication |
+| `/me` | Источник истины для authenticated user |
+| TanStack Query | Frontend server state |
+
+### Important boundaries
+
+- `AuthService` не должен создавать User при регистрации.
+- Verification flow отвечает за создание User.
+- `Registered` event не используется для первичной регистрации.
+- `WelcomeNotification` отправляется только после успешного создания User.
+- Frontend не считает пользователя authenticated после `/register`.
+- Zustand не хранит самостоятельную копию User как источник истины.
+
+---
+
+## 7. Related Issues and Future Decisions
+
+### ISSUE-2 — Email Squatting
+
+**Status:** Architecture decision accepted; implementation pending.
+
+Основная проблема решается через Zero-DB-write registration.
+
+Пока email не подтверждён, запись в `users` отсутствует, следовательно, email не резервируется в MySQL.
+
+### ISSUE-1 — Account Restoration
+
+Soft-delete и восстановление аккаунтов относятся только к существующим подтверждённым пользователям.
+
+Pending registration в Redis не участвует в этом процессе.
+
+Отдельно необходимо формализовать решение по уникальности email при soft-delete:
+
+- Generated column для `email_active` рассматривается как выбранное направление.
+- Anonymization не выбрана из-за конфликта с будущим восстановлением через `withTrashed()`.
+- Формальный AUTH для этого решения ещё не создан.
+
+### AUTH-11 — User Enumeration and Rate Limiting
+
+AUTH-11 остаётся связанным решением для нейтральных ответов и защиты registration endpoints.
+
+Для новой архитектуры дополнительно используются:
+
+- IP rate limit.
+- Cooldown по `email_hash`.
+- Resend cooldown 60 секунд.
+
+---
+
+## 8. Implementation Checklist
+
+Следующий список описывает практическую последовательность реализации V2.
+
+### Backend
+
+- [ ] Проверить текущий Auth module и существующие endpoints.
+- [ ] Реализовать Pending Registration storage в Redis.
+- [ ] Реализовать создание pending registration без записи в MySQL.
+- [ ] Реализовать email index.
+- [ ] Реализовать IP rate limiting и email cooldown.
+- [ ] Реализовать verification Signed URL с registration token.
+- [ ] Реализовать atomic `GETDEL`.
+- [ ] Реализовать создание User внутри DB transaction.
+- [ ] Устанавливать `email_verified_at` при создании User.
+- [ ] Удалять email index после commit.
+- [ ] Реализовать WelcomeNotification после успешной verification.
+- [ ] Создавать Sanctum session после успешной verification.
+- [ ] Реализовать resend с перевыпуском token.
+- [ ] Обрабатывать `410 Gone`.
+- [ ] Проверить middleware для всех route groups.
+
+### Frontend
+
+- [ ] Обновить тип ответа `sessionApi.register()`.
+- [ ] Обрабатывать `202 Accepted`.
+- [ ] Добавить pending verification state.
+- [ ] Реализовать frontend page `/auth/verify-email`.
+- [ ] При mount выполнять POST `/verify`.
+- [ ] Обрабатывать expired/used links (`410 Gone`).
+- [ ] Реализовать resend и cooldown timer.
+- [ ] После успешной verification инвалидировать `/me`.
+- [ ] Проверить initial session restoration через `/me`.
+
+### Testing
+
+- [ ] Registration не создаёт User в MySQL.
+- [ ] Registration создаёт pending key в Redis.
+- [ ] Pending registration автоматически истекает через 20 минут.
+- [ ] Verification создаёт User с `email_verified_at`.
+- [ ] Verification создаёт Sanctum session.
+- [ ] Повторная verification возвращает `410 Gone`.
+- [ ] Два одновременных verification-запроса не создают двух пользователей.
+- [ ] MySQL failure после GETDEL не приводит к созданию частичного User.
+- [ ] Resend перевыпускает token.
+- [ ] Старый token после resend больше не работает.
+- [ ] Last registration wins при совпадающем email.
+- [ ] Email index не блокирует регистрацию при отсутствии основного key.
+- [ ] Cooldown и IP rate limiting работают корректно.
+- [ ] WelcomeNotification отправляется только после verification.
+- [ ] Redis outage корректно обрабатывается.
+- [ ] Frontend обновляет `/me` после успешной verification.
+
+---
+
+## 9. Decision Summary
+
+| AUTH | Decision | Status |
+|---|---|---|
+| AUTH-13 | Signed URL подписывает registration token | Accepted |
+| AUTH-14 | TTL 20 минут, resend cooldown 60 секунд | Accepted |
+| AUTH-15 | Zero-DB-write registration, Redis pending state, GETDEL, last registration wins | Accepted |
+| AUTH-16 | Sequential verification and welcome emails | Accepted |
+| AUTH-17 | Guest-first browsing, granular middleware | Accepted |
+| AUTH-18 | `/me` — единственный источник истины для User state | Accepted |
+
+**Итоговая архитектура:** до подтверждения email регистрация существует только в Redis. После успешной verification данные атомарно извлекаются из Redis, User создаётся в MySQL как verified, затем отправляется WelcomeNotification и создаётся Sanctum session.
+
+Это устраняет корневую причину ISSUE-2, не создавая временных или неподтверждённых User-записей в MySQL.
 
 ---
 
 ## Known / Accepted Risks (Принятые риски)
 
-> Таблица отражает текущую (v2, zero-DB-write) архитектуру.
+> Таблица отражает текущую архитектуру.
+
+> Revised: 2026-11-19 — согласована с AUTH-5, AUTH-14 (20 минут), AUTH-15, AUTH-18.
 
 | Риск | Уровень | Смягчение | Статус |
-| ----------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| --- | --- | --- | --- |
 | Signed params в query string фронта | Medium | `router.replace` после verification + `Referrer-Policy` на фронте | Accepted |
-| Автоверификация роботами (Safe Links) | Medium | Next.js перехватывает входящий `GET` и отправляет явный `POST` запрос на backend | Accepted |
-| Replay атака на verification URL | Low | После успешной verification `registration:{token}` удаляется из Redis, поэтому повторное использование того же token не может повторно создать аккаунт | Accepted |
-| Race condition при verification | Low | Создание `User` выполняется внутри DB transaction с уникальным `email`; pending registration удаляется из Redis только после успешного commit | Accepted |
-| Синхронный SMTP блокирует HTTP-поток | Low | Осознанный компромисс ради простоты отладки на этапе разработки и MVP (см. AUTH-5) | Accepted |
-| Redis недоступен во время регистрации | Medium | Redis является частью critical path; registration не создаётся в MySQL без успешного сохранения pending registration | Accepted |
-| Pending registration содержит hashed password в Redis | Medium | Password хранится только в hashed form, registration имеет короткий TTL, Redis не должен логировать содержимое ключей | Accepted |
+| Автоверификация роботами (Safe Links) | Medium | Next.js перехватывает входящий `GET` и отправляет явный `POST` на backend (AUTH-2) | Accepted |
+| Replay и двойной клик по ссылке (race при verification) | Low | Атомарный `GETDEL` по `sha256(rawToken)`: второй запрос получает `null`. Осознанно *delete before commit* вместо *delete after commit* (AUTH-15): при падении MySQL после `GETDEL` пользователь регистрируется заново. `UNIQUE` на `users.email` — финальный барьер, ловим `UniqueConstraintViolationException`. Индекс `registration:email:{email_hash}` удаляется после commit, висячий индекс безвреден (истина в основном ключе) | Accepted |
+| Redis недоступен или вытесняет ключи | Medium | Redis в critical path регистрации. AOF `appendfsync everysec`, `maxmemory-policy noeviction`. При заполнении памяти `/register` отвечает `5xx`: нужен мониторинг `used_memory` и алерт | Accepted |
+| Pending registration содержит hashed password в Redis | Medium | Только `Hash::make()`, TTL 20 минут. В payload задания очереди пароль не попадает, тело запросов и query verification не логируются | Accepted |
+| `rawToken` в очереди и `failed_jobs` | Low | В задании только `email`, `rawToken`, время истечения. `queue:prune-failed` по расписанию. После TTL токен бесполезен | Accepted |
+| Письмо не доставлено после `202 Accepted` | Low | `ShouldQueue`, `$tries = 3`, `$backoff = [10, 30]`, мониторинг `failed_jobs`, кнопка resend с cooldown 60 секунд (AUTH-5, AUTH-14, AUTH-18) | Accepted |
+| Email bombing чужого ящика | Medium | `RateLimiter` по IP + cooldown по `email_hash` (`registration:email:{email_hash}` как единый формат ключа) | Accepted |
+| Pre-hijacking: регистрация на чужой email | Low | В письме явная фраза «Если вы не регистрировались, проигнорируйте это письмо». Повторная регистрация или resend перевыпускает токен, старый удаляется (последняя регистрация побеждает). Лимиты из строки про email bombing | Accepted |
+| Нет истории незавершённых регистраций в MySQL | Low | Сознательный отказ ради чистоты `users` и отсутствия cleanup-джобов. Воронка собирается через обезличенные метрики | Accepted |
+| Нет `user_id` до верификации | Low | До подтверждения аккаунта нет: wishlist и гостевое состояние живут на клиенте (AUTH-17) | Accepted |
 
 ---
 
@@ -636,4 +1383,4 @@ Authenticated User
 
 ---
 
-_Last updated: 2026-09-18_
+_Last updated: 2026-11-19_
