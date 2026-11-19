@@ -223,7 +223,7 @@ eCommerceApi/
 * Redis становится critical path для регистрации.
 * Pending registration содержит `hashed password` в Redis до истечения TTL.
 * Resend требует отдельного Redis email index.
-* Поведение повторного клика по уже использованной verification link требует отдельного решения (`410 Gone` или short-lived `verified:{token}` marker).
+* Повторный клик по уже использованной verification link и истёкшая ссылка: `410 Gone` (AUTH-15, AUTH-18). Отдельный `verified:{token}` marker не вводится.
 * Риск User Enumeration при `422` для существующего email сохраняется и описан отдельно в AUTH-11.
 
 **Связь с ISSUE-1:**

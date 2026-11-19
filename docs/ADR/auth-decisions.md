@@ -318,7 +318,7 @@
 
 ---
 
-### AUTH-11: Допущение User Enumeration на этапе регистрации ради UX и поддержки Soft Deletes
+### AUTH-11: Допущение User Enumeration(атака перебора) на этапе регистрации ради UX и поддержки Soft Deletes
 
 **Status:** Accepted
 
