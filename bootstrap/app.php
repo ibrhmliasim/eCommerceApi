@@ -3,14 +3,13 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Validation\ValidationException;
- 
+
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
- 
+
 use App\Exceptions\ApiException;
 use App\Support\ValidationErrorCodeMapper;
 
@@ -27,7 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ])
 
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->trustProxies(at: env('TRUSTED_PROXIES', '127.0.0.1'));
+        $middleware->trustProxies(at: config('app.trusted_proxies'));
 
         $middleware->api(prepend: [
             EnsureFrontendRequestsAreStateful::class,
@@ -89,5 +88,5 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
     })
-    
+
     ->create();

@@ -10,6 +10,7 @@
 /.codex
 /.cursor/
 /.idea
+/.aiassistant
 /.nova
 /.phpunit.cache
 /.vscode

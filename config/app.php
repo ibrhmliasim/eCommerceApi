@@ -53,7 +53,6 @@ return [
     */
 
     'url' => env('APP_URL', 'http://localhost'),
-    'frontend_url' => env('FRONTEND_URL'),
 
     /*
     |--------------------------------------------------------------------------
@@ -124,4 +123,29 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | This is the URL of the frontend application. It is used to generate
+    | absolute URLs for links and redirects. You should set this to the
+    | URL of your frontend application.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Trusted Proxies
+    |--------------------------------------------------------------------------
+    |
+    | This is the IP address or range of IP addresses that are trusted to
+    | forward client IP addresses. This is useful when your application
+    | is behind a reverse proxy or load balancer.
+    |
+    */
+
+    'trusted_proxies' => env('TRUSTED_PROXIES', '127.0.0.1'),
 ];
